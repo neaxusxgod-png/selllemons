@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v11.1 — релиз: без тост-спама | статус-строки с делеями (lemon + stand) ]] --
+-- [[ SELL LEMONS v11.2 — лимонка не кликает в чужие окна при свёрнутой игре ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1921,6 +1921,8 @@ local function processLemon(v, hrp)
 
     -- играешь -> лимонка ПОЛНОСТЬЮ стоит: ни ТП, ни камеры, ни кликов.
     if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
+    -- v11.2: игра не в фокусе -> не кликаем (клик ушёл бы в другое окно)
+    if not _windowFocused() then return false end
     if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then return false end   -- стенд занят
 
     -- v7.4: сначала тихие режимы; classic только если ничего не сработало
