@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.6 — Auto Deal v2: телефон по кнопке отказа, жмём верхнюю (текст любой) ]] --
+-- [[ SELL LEMONS v13.7 — голова вверх сразу: подготовка дерева ускорена без смены семантики ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1821,28 +1821,42 @@ local function findTreeOf(clickPart)
     return nil
 end
 
--- v13.5: ВОЗВРАТ к оригиналу (золотая версия). Батч-вариант при ошибке на
--- одной части бросал остальные части дерева -> клики втыкались в листву.
+-- v13.7: ВОЗОБНОВЛЯЕМЫЙ цикл: семантика как у per-part pcall (ошибка на
+-- одной части пропускает ТОЛЬКО её), но pcall один - без него подготовка
+-- дерева занимала 10-15с, и камера всё это время не поднималась.
 local function disableTreeCanQuery(tree, excludeSet)
     local modified, n = {}, 0
-    for _, part in ipairs_(tree:GetDescendants()) do
-        if part:IsA("BasePart") and not excludeSet[part] then
-            pcall_(function()
-                if part.CanQuery then
+    local parts
+    pcall_(function() parts = tree:GetDescendants() end)
+    if not parts then return modified, 0 end
+    local i = 1
+    while i <= #parts do
+        local ok = pcall_(function()
+            while i <= #parts do
+                local part = parts[i]
+                if part:IsA("BasePart") and not excludeSet[part] and part.CanQuery then
                     part.CanQuery = false
                     n = n + 1
                     modified[n] = part
                 end
-            end)
-        end
+                i = i + 1
+            end
+        end)
+        if not ok then i = i + 1 end   -- пропустить проблемную часть, продолжить
     end
     return modified, n
 end
 
 local function restoreTreeCanQuery(modified, n)
-    for i = 1, n do
-        local part = modified[i]
-        pcall_(function() part.CanQuery = true end)
+    local i = 1
+    while i <= n do
+        local ok = pcall_(function()
+            while i <= n do
+                modified[i].CanQuery = true
+                i = i + 1
+            end
+        end)
+        if not ok then i = i + 1 end
     end
 end
 
@@ -2130,6 +2144,14 @@ _wrap("lemon-farm", function()
                 -- v13.5: зум возвращён - так было в золотой версии
                 print("[Lemon] AFK -> zoom + farm")
                 LSM.zoom(1)
+                -- v13.7: взгляд вверх сразу, пока готовится первое дерево
+                pcall_(function()
+                    local chrA = player.Character
+                    local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
+                    if hA then
+                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
+                    end
+                end)
             else
                 print("[Lemon] input detected -> back to your spot")
                 LSM.returnHome()
