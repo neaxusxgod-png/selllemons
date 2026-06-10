@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.2 — Auto Deal: автопринятие сделок-телефона ]] --
+-- [[ SELL LEMONS v13.3 — Cash Farm включён по умолчанию ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -78,7 +78,7 @@ end
 
 local autoBuyActive    = false
 local lemonFarmActive  = false
-local cashFarmActive   = false   -- v5.18: ya NO arranca solo; se activa con tecla 4 o GUI
+local cashFarmActive   = true    -- v13.3: включён по умолчанию
 local autoStandActive  = false
 local autoDealActive   = true    -- v13.2: автопринятие сделок (телефон с Deal.)
 local _standIsTapping  = false   -- Gate: true while AutoStand is in E-tap phase
@@ -278,7 +278,7 @@ if homesick then
         print("[Hub] toggle AutoStand = " .. tostring_(val))
     end):addKeybind("3", "Toggle", true, function() end)
 
-    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", false, function(val)
+    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", true, function(val)
         cashFarmActive = val
         print("[Hub] toggle CashFarm = " .. tostring_(val))
     end):addKeybind("4", "Toggle", true, function() end)
