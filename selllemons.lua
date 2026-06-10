@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v11.2 — лимонка не кликает в чужие окна при свёрнутой игре ]] --
+-- [[ SELL LEMONS v12 — TURBO buy (firetouchinterest автодетект) | возврат на место после АФК ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -523,7 +523,7 @@ local lastCashCount   = 0
 -- (v6.0) Хоткеи 1-5 и Insert теперь в INPUT-блоке внизу файла.
 
 -- v7.4: режим сбора лимонов (автоопределяется на первых фруктах, см. ниже)
-local LSM = { mode = nil }   -- nil=детект | "cd" | "sig" | "touch" | "classic"
+local LSM = { mode = nil, annAfk = false, annBuy = false }   -- nil=детект | "cd" | "sig" | "touch" | "classic"; ann-флаги СРАЗУ false (nil давал ложный переход)
 -- v7.7: ручные точки стендов — клавиша 6 запоминает позицию персонажа,
 -- АвтоСтенд ТПшится в каждую и жмёт E. Корды печатаются для хардкода.
 local standManual = {
@@ -1573,6 +1573,11 @@ local function runStandPass(firstRun)
     return "done"
 end
 
+-- v12 ТУРБО-покупка: firetouchinterest шлёт серверу событие касания сразу,
+-- без ожидания физики. Автодетект: nil = пробуем, true = работает (летим),
+-- false = в этой Матче нет эффекта (3 чистых провала) -> классика навсегда.
+local TURBO = { mode = nil, fails = 0 }
+
 -- ==================== AUTO BUY (ORIGINAL v5.17 - worker + coordinator) ====================
 -- Restaurado tal cual el codigo que SI funcionaba. TP a la posicion del boton.
 _wrap("autobuy-worker", function()
@@ -1667,25 +1672,62 @@ _wrap("autobuy-worker", function()
         local pos = btn.Position
         local px, py, pz = pos.X, pos.Y, pos.Z
 
-        -- v5.21: aterriza sobre el boton y CONFIRMA en una ventana (no 1 chequeo
-        -- a 0.1s). Sale en cuanto el boton desaparece -> rapido si el server va
-        -- rapido, paciente si hay lag. Re-planta el HRP cada vuelta para re-
-        -- disparar el .Touched del server (a veces 1 toque no registra).
-        pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
-        task_wait(0.02)   -- v8.0: быстрее посадка
-
         local bought = false
-        local t0 = tick_()
-        while ScriptActive and (tick_() - t0) < CFG.buyWindow do
+        local turboBought = false
+
+        -- v12: ТУРБО-попытка (ТП к кнопке всё равно нужен - сервер проверяет
+        -- дистанцию, но ждать физического Touched не надо)
+        if TURBO.mode ~= false and type(firetouchinterest) == "function" then
             pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-            task_wait(0.03)   -- v8.0: чаще опрос -> покупка подтверждается раньше
-            local gone = true
+            task_wait()
             pcall_(function()
-                gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
+                firetouchinterest(btn, hrp, 0)
+                firetouchinterest(btn, hrp, 1)
             end)
-            if gone then bought = true; break end
-            -- si se volvio gris a mitad (se acabo la plata), no insistir
-            if isGreyedOut(btn) then break end
+            local tt = tick_()
+            while ScriptActive and (tick_() - tt) < 0.25 do
+                task_wait(0.03)
+                local gone = true
+                pcall_(function()
+                    gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
+                end)
+                if gone then bought = true; turboBought = true; break end
+            end
+            if turboBought and TURBO.mode == nil then
+                TURBO.mode = true
+                print("[Worker] TURBO ON: firetouchinterest works")
+            end
+        end
+
+        if not bought then
+            -- классика v5.21 (проверенная): посадка + окно подтверждения с
+            -- перестановкой HRP (иногда одного касания мало)
+            pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
+            task_wait(0.02)
+            local classicStart = tick_()
+            local t0 = tick_()
+            while ScriptActive and (tick_() - t0) < CFG.buyWindow do
+                pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
+                task_wait(0.03)
+                local gone = true
+                pcall_(function()
+                    gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
+                end)
+                if gone then bought = true; break end
+                -- кнопка посерела на середине (кончились деньги) - не упорствуем
+                if isGreyedOut(btn) then break end
+            end
+            -- детект: классика добила то, что турбо не смог = чистый провал турбо
+            -- если классика подтвердила почти мгновенно - это сработал ТУРБО-тач
+            -- (просто сервер ответил позже окна), провалом турбо НЕ считаем
+            if bought and TURBO.mode == nil and type(firetouchinterest) == "function"
+               and (tick_() - classicStart) >= 0.15 then
+                TURBO.fails = TURBO.fails + 1
+                if TURBO.fails >= 3 then
+                    TURBO.mode = false
+                    print("[Worker] turbo off: firetouchinterest has no effect here")
+                end
+            end
         end
 
         if bought then
@@ -1916,6 +1958,34 @@ function LSM.zoom(dir)
     end
 end
 
+-- v12: умный возврат после АФК-фарма. Порядок важен:
+-- 1) ТП на место, где игрок стоял + погасить скорость (антиграв давал +Y);
+-- 2) зум-аут из первого лица;
+-- 3) вернуть ракурс: камера на тот же оффсет от персонажа, что и до фарма.
+-- Якорь одноразовый (чистится), без якоря просто зум-аут.
+function LSM.returnHome()
+    local a = LSM.anchor
+    LSM.anchor = nil
+    if a then
+        pcall_(function()
+            local chr = player.Character
+            local h = chr and chr:FindFirstChild("HumanoidRootPart")
+            if h then
+                h.CFrame = CF(a.X, a.Y + 1, a.Z)
+                h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+            end
+        end)
+    end
+    LSM.zoom(-1)
+    if a and LSM.anchorCam then
+        pcall_(function()
+            camera.lookAt(a + LSM.anchorCam, a)
+        end)
+    end
+    LSM.anchorCam = nil
+    if a then print("[Lemon] returned to your spot") end
+end
+
 local function processLemon(v, hrp)
     if not v or not v:IsDescendantOf(Workspace) then return false end
 
@@ -2069,16 +2139,25 @@ _wrap("lemon-farm", function()
         if lemonFarmActive and LSM.annAfk ~= afkNow then
             LSM.annAfk = afkNow
             if afkNow then
+                -- запомнить, где стоял игрок и как смотрела камера (для возврата)
+                pcall_(function()
+                    local chr2 = player.Character
+                    local h2 = chr2 and chr2:FindFirstChild("HumanoidRootPart")
+                    if h2 then
+                        LSM.anchor = h2.Position
+                        LSM.anchorCam = camera.Position - h2.Position
+                    end
+                end)
                 print("[Lemon] AFK -> zoom to 1st person + farm")
                 LSM.zoom(1)
             else
-                print("[Lemon] input detected -> paused, zoom back")
-                LSM.zoom(-1)
+                print("[Lemon] input detected -> back to your spot")
+                LSM.returnHome()
             end
         end
         if not lemonFarmActive and LSM.annAfk then
             LSM.annAfk = false
-            LSM.zoom(-1)   -- лимонку выключили посреди фарма: вернуть зум
+            LSM.returnHome()   -- лимонку выключили посреди фарма: домой + зум
         end
         local standBusy = autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4
         if lemonFarmActive and hrp and not buyBusy and not standBusy and afkNow then
@@ -2342,6 +2421,7 @@ _wrap("auto-stand", function()
 end)
 
 _G.MatchaCleanup = function()
+    pcall_(LSM.returnHome)   -- выгрузили посреди АФК-фарма: вернуть игрока на место
     ScriptActive = false
     pcall_(function() if UIRef.win then UIRef.win.visible = false end end)
     for _, obj in ipairs_(drawObjs) do
