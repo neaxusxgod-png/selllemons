@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13 — таймер лозы читается ИЗ ИГРЫ (текст замка), секунда в секунду ]] --
+-- [[ SELL LEMONS v13.1 — таймер тикает ВСЕГДА (синк у замка, отсчёт свой) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2387,7 +2387,17 @@ local function pollInput()
         local lbl = LSM.vineLblRef
         if lbl and lbl.Parent then
             local t = tostring_(lbl.Text)
-            if t:match("^%d+:%d%d:%d%d$") then vTimer = t end
+            if t:match("^%d+:%d%d:%d%d$") then
+                if t ~= LSM.vineLblLast then
+                    LSM.vineLblLast = t
+                    LSM.vineLblChangeT = tick_()
+                end
+                -- v13.1: текст тикает только рядом с лозой; замороженный
+                -- (ушёл далеко) для синхронизации НЕ берём
+                if (tick_() - (LSM.vineLblChangeT or 0)) < 3 then
+                    vTimer = t
+                end
+            end
         end
         if not vTimer and (tick_() - (LSM.vineScanT or 0)) > 3 then
             LSM.vineScanT = tick_()
@@ -2401,7 +2411,8 @@ local function pollInput()
                         local t2 = tostring_(d.Text)
                         if t2:match("^%d+:%d%d:%d%d$") then
                             LSM.vineLblRef = d
-                            vTimer = t2
+                            LSM.vineLblLast = t2
+                            LSM.vineLblChangeT = 0   -- доверяем после первого тика
                             break
                         end
                     end
@@ -2423,12 +2434,9 @@ local function pollInput()
             end
         end)
     end
-    if vTimer then
-        statusTx3.Text = "cash vine  |  " .. vTimer
-        statusTx3.Color = C3rgb(222, 210, 170)
-        statusTx3.Position = Vec2(vx, sy)
-        statusTx3.Visible = true
-    elseif vReady == true then
+    -- v13.1: показываем СВОЙ тикающий отсчёт всегда (замок обновляется
+    -- игрой только рядом с лозой). Лейбл - только для синхронизации.
+    if vReady == true then
         statusTx3.Text = "cash vine  |  READY"
         statusTx3.Color = C3rgb(255, 214, 60)
         if not CFG.vineNotif then
@@ -2437,10 +2445,22 @@ local function pollInput()
         end
         statusTx3.Position = Vec2(vx, sy)
         statusTx3.Visible = true
-    elseif CFG.vineT and (CFG.vineCd - (tick_() - CFG.vineT)) > 0 then
+    elseif CFG.vineT then
         local rem = CFG.vineCd - (tick_() - CFG.vineT)
-        statusTx3.Text = sformat("cash vine  |  ~%dh %02dm", mfloor(rem / 3600), mfloor((rem % 3600) / 60))
-        statusTx3.Color = C3rgb(222, 210, 170)
+        if rem > 0 then
+            statusTx3.Text = sformat("cash vine  |  %d:%02d:%02d", mfloor(rem / 3600), mfloor((rem % 3600) / 60), mfloor(rem % 60))
+            statusTx3.Color = C3rgb(222, 210, 170)
+        elseif vReady == false then
+            statusTx3.Text = "cash vine  |  soon..."
+            statusTx3.Color = C3rgb(222, 210, 170)
+        else
+            statusTx3.Text = "cash vine  |  READY"
+            statusTx3.Color = C3rgb(255, 214, 60)
+            if not CFG.vineNotif then
+                CFG.vineNotif = true
+                pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
+            end
+        end
         statusTx3.Position = Vec2(vx, sy)
         statusTx3.Visible = true
     else
