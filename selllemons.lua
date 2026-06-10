@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.17 — фикс таймера Cash Vine (показывало 8ч): метка из будущего/чужой лейбл отбрасываются ]] --
+-- [[ SELL LEMONS v18.18 — минигейм: READY/замороженный таймер | стенд: камера сверху вниз ПКМ-орбитой ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.17 ===")
+print("=== SELL LEMONS v18.18 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -317,6 +317,12 @@ MG.timerSec = function()
     -- v18.15: кэш 1с. Эту функцию зовут статус-строка (была КАЖДЫЙ КАДР) и цикл
     -- минигейма - а внутри полный GetDescendants по моделям минигеймов (тысячи
     -- частей). Именно это клало FPS у людей при включённом Auto Minigame.
+    -- v18.18: игра при готовности ПРЯЧЕТ лейбл таймера и показывает "READY", а
+    -- скрытый лейбл ЗАМОРАЖИВАЕТСЯ с последним временем (скрин оператора: на
+    -- скамейке READY/PLAY, хаб ждёт "3:16" с мёртвого лейбла). Поэтому, как у
+    -- лозы: (1) таймер берём только с ВИДИМОГО лейбла, который РЕАЛЬНО ТИКАЕТ
+    -- (текст меняется; "доверяем после первого тика"); (2) видимый "READY" без
+    -- тикающего таймера = кулдауна нет, локальный отсчёт сбрасываем.
     local now = tick_()
     if MG.tsT and (now - MG.tsT) < 1.0 then return MG.tsVal end
     MG.tsT = now
@@ -325,7 +331,11 @@ MG.timerSec = function()
     local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
     local mg = pur and pur:FindFirstChild("Minigames")
     if not mg then return nil end
-    local rem
+    if not MG.lblSeen then
+        MG.lblSeen = {}
+        pcall_(function() setmetatable(MG.lblSeen, { __mode = "k" }) end)
+    end
+    local rem, ready
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
@@ -333,17 +343,43 @@ MG.timerSec = function()
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "TextLabel" then
                         local t; pcall_(function() t = d.Text end)
-                        local hh, mm, ss = tostring_(t or ""):match("^%s*(%d+):(%d%d):(%d%d)%s*$")
-                        if hh then
-                            local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
-                            -- v18.17: кулдаун минигейма - минуты; >2ч = чужой лейбл, не берём
-                            if r > 0 and r < 2 * 3600 then rem = r; return end
+                        t = tostring_(t or "")
+                        if t:upper():find("READY") then
+                            if MG.shown(d) then ready = true end
+                        else
+                            local hh, mm, ss = t:match("^%s*(%d+):(%d%d):(%d%d)%s*$")
+                            if hh and MG.shown(d) then
+                                local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
+                                -- v18.17: кулдаун минигейма - минуты; >2ч = чужой лейбл
+                                if r > 0 and r < 2 * 3600 then
+                                    local rec = MG.lblSeen[d]
+                                    if not rec then
+                                        rec = { txt = t, t = 0, seen = now }   -- доверяем после первого тика
+                                        MG.lblSeen[d] = rec
+                                    elseif rec.txt ~= t then
+                                        rec.txt = t
+                                        -- тик засчитываем только при НЕПРЕРЫВНОМ наблюдении
+                                        -- (аудит: после паузы тоггла первое "изменение"
+                                        -- замороженного лейбла - не тик, ждём второй)
+                                        rec.t = (now - rec.seen) <= 2.5 and now or 0
+                                    end
+                                    rec.seen = now
+                                    if (now - rec.t) < 3 then rem = r end
+                                end
+                            end
                         end
                     end
                 end
             end
         end
     end)
+    -- тикающий таймер сильнее READY (скрытый READY-лейбл Матча может счесть
+    -- видимым - .Visible иногда читается как nil); READY без таймера = готов.
+    -- miniEnd = "уже истёк" (НЕ nil: статус покажет READY и придёт notify),
+    -- локальный отсчёт с мёртвого лейбла затирается.
+    if not rem and ready then
+        MG.miniEnd = now
+    end
     MG.tsVal = rem
     return rem
 end
@@ -999,9 +1035,11 @@ local function runLocationsPass(firstRun)
             print("[Stand] " .. s.name .. (standEnabled[s.name] == false and "  OFF" or "  ON"))
         end
     end
-    -- v18.14: стенд ОТДАЛЯЕТ камеру (третье лицо, как просил) и смотрит ВНИЗ на
-    -- стенд - камера сверху-сзади над игроком. lookAt держим прямо перед каждым E.
+    -- v18.14: стенд ОТДАЛЯЕТ камеру (третье лицо, как просил).
     LSM.zoom(-1)
+    -- v18.18: и наклоняет её СВЕРХУ ВНИЗ на пол ПКМ-орбитой - один раз на весь
+    -- проход (угол держится сам через все ТП между стендами).
+    local tilted = LSM.tiltDown()
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
@@ -1009,12 +1047,9 @@ local function runLocationsPass(firstRun)
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
                 task_wait(0.05)
-                -- v18.16: камеру вниз на стенд поворачиваем ПКМ-орбитой (без
-                -- мерцания, угол ДЕРЖИТСЯ сам). lookAt каждый тик - только
-                -- фоллбэк, если ПКМ недоступен/не в фокусе.
-                local aimed = LSM.aimCam(s.pos)
+                -- фоллбэк-ракурс (ПКМ недоступен/не в фокусе): lookAt по тикам
                 local eye, target
-                if not aimed then
+                if not tilted then
                     pcall_(function()
                         local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if h then
@@ -1028,7 +1063,7 @@ local function runLocationsPass(firstRun)
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
                     LSM.lastBot = tick_()
-                    if not aimed and eye then pcall_(function() camera.lookAt(eye, target) end) end
+                    if not tilted and eye then pcall_(function() camera.lookAt(eye, target) end) end
                     if _windowFocused() then keypress(STAND_KEY); keyrelease(STAND_KEY) end
                     task_wait(0.05)
                 end
@@ -1401,42 +1436,34 @@ function LSM.zoom(dir)
     if LSM.mode == "cd" or LSM.mode == "sig" then return end
     if type(mousescroll) ~= "function" then return end
     LSM.zoomedIn = dir > 0   -- v18.15: трекаем зум - лемон сам перезумится, когда получит ход
-    LSM.lastBot = tick_()
     for _ = 1, CFG.zoomTicks do
+        LSM.lastBot = tick_()   -- v18.18: штамп в цикле - зум 0.5с, окно бот-фазы 0.35с
         pcall_(mousescroll, CFG.zoomStep * dir)
         task_wait(0.02)
     end
 end
 
--- v18.16: повернуть камеру В ТРЕТЬЕМ ЛИЦЕ на цель БЕЗ мерцания. lookAt в 3-м
--- лице дрётся с дефолтной камерой (экран мелькал, срабатывало через раз).
--- Канонический способ - как игрок: зажать ПКМ (mouse2press) и повести мышь
--- (mousemoverel) - камера орбитой поворачивается и ОСТАЁТСЯ. Доворачиваем с
--- проверкой через WorldToScreen (как прицел лемонки), максимум 5 коррекций.
--- true = цель в кадре у центра; false = ПКМ нет/не в фокусе -> фоллбэк lookAt.
-function LSM.aimCam(pos)
+-- v18.18: камера СВЕРХУ ВНИЗ на пол (вид как на скрине оператора). v18.16
+-- наводила стенд в центр экрана - но из-за спины он И ТАК в центре, наклона
+-- не было ("только отдаляет, не двигает"). Правильно: зажать ПКМ (орбита, как
+-- игрок) и увести мышь ВНИЗ С ЗАПАСОМ - Roblox сам клампит наклон (~80°),
+-- перебор безвреден, выходит стабильный вид сверху. Угол ДЕРЖИТСЯ сам, без
+-- мерцания. false = ПКМ нет/не в фокусе -> фоллбэк lookAt по тикам.
+function LSM.tiltDown()
     if not _windowFocused() then return false end
-    if type(mouse2press) ~= "function" or type(mouse2release) ~= "function" then return false end
+    if type(mouse2press) ~= "function" or type(mouse2release) ~= "function"
+       or type(mousemoverel) ~= "function" then return false end
     local ok = false
     pcall_(function()
-        local vps = camera.ViewportSize
-        local cx, cy = vps.X * 0.5, vps.Y * 0.5
-        for _ = 1, 5 do
-            local sp, on = WorldToScreen(pos)
-            if on and sp and mabs(sp.X - cx) < vps.X * 0.22 and mabs(sp.Y - cy) < vps.Y * 0.22 then
-                ok = true
-                break
-            end
+        LSM.lastBot = tick_()
+        mouse2press()
+        for _ = 1, 6 do
+            mousemoverel(0, 250)   -- 6x250px вниз = упор в кламп при любой чувствительности
             LSM.lastBot = tick_()
-            mouse2press()
-            if on and sp then
-                mousemoverel(mfloor((sp.X - cx) * 0.4), mfloor((sp.Y - cy) * 0.4))
-            else
-                mousemoverel(0, 200)   -- цель за кадром: ведём взгляд вниз
-            end
-            mouse2release()
-            task_wait(0.03)
+            task_wait(0.02)
         end
+        mouse2release()
+        ok = true
     end)
     pcall_(function() mouse2release() end)   -- страховка: ПКМ не должен залипнуть
     return ok
