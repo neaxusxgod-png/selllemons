@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.15 — БОЛЬШАЯ ОПТИМИЗАЦИЯ (лаги меню) | минигейм CHEER/EXIT фикс | плавный зум после стендов ]] --
+-- [[ SELL LEMONS v18.16 — стенд-камера ПКМ-орбитой (без мерцания) | сохранение убрано | FPS Save режим ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.15 ===")
+print("=== SELL LEMONS v18.16 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -279,24 +279,10 @@ end
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }   -- v17: Auto Minigame (всё в таблице = 1 регистр)
--- v18.7: СВОЁ сохранение состояния. homesick грузит config из одного файла, а
--- его setItemValue (клик по тогглу) НЕ пишет вообще -> состояние не сохранялось.
--- Пишем сами в selllemons_state.json на каждое изменение, читаем при загрузке.
--- Всё в полях S/UIRef -> регистры не тратим. S.loaded гасит запись во время
--- начальной загрузки (чтобы коллбэки homesick не затёрли наш файл).
-S.loaded = false
-S.saveState = function()
-    if not S.loaded then return end
-    pcall_(function()
-        if type(writefile) ~= "function" then return end
-        local hs = game:GetService("HttpService")
-        writefile("selllemons_state.json", hs:JSONEncode({
-            ab = autoBuyActive, lf = lemonFarmActive, as = autoStandActive,
-            cf = cashFarmActive, ad = autoDealActive, mg = MG.active,
-            st = standEnabled, mn = MG.enabled,
-        }))
-    end)
-end
+-- v18.16: сохранение состояния тогглов/позиции окна УДАЛЕНО (оператор: работало
+-- криво - убрать). Все тогглы стартуют с дефолтов при каждой загрузке. No-op
+-- оставлен, чтобы не трогать десяток вызовов в коллбэках.
+S.saveState = function() end
 -- v18.2: список минигеймов = папки в Purchases.Minigames (для чекбоксов-селектора)
 MG.list = function()
     local out = {}
@@ -430,10 +416,8 @@ end
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
     local window = homesick.createWindow("Sell Lemons", 480, 420)
-    -- v18.7: грузим из "config" - тот же файл, куда homesick пишет позицию окна
-    -- при перетаскивании (раньше было "selllemons_config" - НЕ совпадало с записью).
-    pcall_(function() window:autoloadConfig("config") end)
-    pcall_(function() window:autoloadTheme("theme") end)
+    -- v18.16: autoloadConfig/autoloadTheme убраны вместе со всем сохранением -
+    -- окно и тогглы каждый раз чистые, тема всегда наша жёлтая.
     UIRef.win = window
 
     local tab1 = window:addTab("Main")
@@ -483,6 +467,12 @@ if homesick then
         else
             CFG.vineBack = true  -- ВЫКЛ: вернуться, где был
         end
+    end)
+
+    -- v18.16: режим для слабых ПК - все фоновые циклы реже (статус, сканы
+    -- телефона/минигейма, холостой автобай). Фарм-действия НЕ замедляет.
+    UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
+        CFG.slow = val and true or false
     end)
 
     pcall_(function() right:addSeparator() end)
@@ -540,36 +530,8 @@ if homesick then
 
     window.visible = true
     window:render()
-
-    -- v18.7: ВОССТАНОВЛЕНИЕ сохранённого состояния (после render, поверх того, что
-    -- подтянул homesick). Применяем к булевым, таблицам и отражаем в виджетах.
-    pcall_(function()
-        if type(readfile) ~= "function" then return end
-        local raw = readfile("selllemons_state.json")
-        if not raw or raw == "" then return end
-        local d = game:GetService("HttpService"):JSONDecode(raw)
-        if type(d) ~= "table" then return end
-        autoBuyActive   = d.ab == true
-        lemonFarmActive = d.lf == true
-        autoStandActive = d.as == true
-        cashFarmActive  = d.cf ~= false   -- Cash Farm по умолчанию ВКЛ
-        autoDealActive  = d.ad ~= false   -- Auto Deal по умолчанию ВКЛ
-        MG.active       = d.mg == true
-        if type(d.st) == "table" then for k, v in pairs_(d.st) do standEnabled[k] = v end end
-        if type(d.mn) == "table" then for k, v in pairs_(d.mn) do MG.enabled[k] = v end end
-        pcall_(function() UIRef.t.AutoBuy:SetValue(autoBuyActive) end)
-        pcall_(function() UIRef.t.LemonFarm:SetValue(lemonFarmActive) end)
-        pcall_(function() UIRef.t.AutoStand:SetValue(autoStandActive) end)
-        pcall_(function() UIRef.t.CashFarm:SetValue(cashFarmActive) end)
-        pcall_(function() UIRef.t.AutoDeal:SetValue(autoDealActive) end)
-        pcall_(function() UIRef.t.AutoMini:SetValue(MG.active) end)
-        for k, cb in pairs_(UIRef.standCb) do pcall_(function() cb:SetValue(standEnabled[k] ~= false) end) end
-        for k, cb in pairs_(UIRef.miniCb) do pcall_(function() cb:SetValue(MG.enabled[k] ~= false) end) end
-    end)
     print("[Hub] homesick UI loaded - keys 1-5 via keybinds")
 end
--- v18.7.1: вне if homesick - чтобы сохранение работало и в фоллбэк-режиме (без UI)
-S.loaded = true   -- с этого момента изменения пишутся в файл
 
 -- ==================== AUTOBUY ====================
 local function normalizeColor(c)
@@ -1043,21 +1005,26 @@ local function runLocationsPass(firstRun)
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
                 task_wait(0.05)
-                -- камера СВЕРХУ-СЗАДИ над игроком, взгляд ВНИЗ на стенд (отдалённо).
+                -- v18.16: камеру вниз на стенд поворачиваем ПКМ-орбитой (без
+                -- мерцания, угол ДЕРЖИТСЯ сам). lookAt каждый тик - только
+                -- фоллбэк, если ПКМ недоступен/не в фокусе.
+                local aimed = LSM.aimCam(s.pos)
                 local eye, target
-                pcall_(function()
-                    local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if h then
-                        local p = h.Position
-                        eye = p + Vec3(0, 10, 16)     -- выше и за спиной = отдалено
-                        target = p + Vec3(0, -1, 2)    -- смотрим вниз на стенд
-                    end
-                end)
+                if not aimed then
+                    pcall_(function()
+                        local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        if h then
+                            local p = h.Position
+                            eye = p + Vec3(0, 10, 16)     -- выше и за спиной = отдалено
+                            target = p + Vec3(0, -1, 2)    -- смотрим вниз на стенд
+                        end
+                    end)
+                end
                 _standIsTapping = true   -- автобай-воркер уступает на время спама
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
                     LSM.lastBot = tick_()
-                    if eye then pcall_(function() camera.lookAt(eye, target) end) end
+                    if not aimed and eye then pcall_(function() camera.lookAt(eye, target) end) end
                     if _windowFocused() then keypress(STAND_KEY); keyrelease(STAND_KEY) end
                     task_wait(0.05)
                 end
@@ -1160,8 +1127,8 @@ _wrap("autobuy-worker", function()
             end
             -- v18.15: ХОЛОСТОЙ ход (покупать нечего) - 0.12с вместо 0.05с.
             -- Покупки не замедляет (когда очередь не пуста, сюда не попадаем),
-            -- а холостые сканы режутся в ~2.5 раза.
-            task_wait(0.12)
+            -- а холостые сканы режутся в ~2.5 раза. FPS Save -> ещё реже.
+            task_wait(CFG.slow and 0.3 or 0.12)
             continue
         end
 
@@ -1435,6 +1402,40 @@ function LSM.zoom(dir)
         pcall_(mousescroll, CFG.zoomStep * dir)
         task_wait(0.02)
     end
+end
+
+-- v18.16: повернуть камеру В ТРЕТЬЕМ ЛИЦЕ на цель БЕЗ мерцания. lookAt в 3-м
+-- лице дрётся с дефолтной камерой (экран мелькал, срабатывало через раз).
+-- Канонический способ - как игрок: зажать ПКМ (mouse2press) и повести мышь
+-- (mousemoverel) - камера орбитой поворачивается и ОСТАЁТСЯ. Доворачиваем с
+-- проверкой через WorldToScreen (как прицел лемонки), максимум 5 коррекций.
+-- true = цель в кадре у центра; false = ПКМ нет/не в фокусе -> фоллбэк lookAt.
+function LSM.aimCam(pos)
+    if not _windowFocused() then return false end
+    if type(mouse2press) ~= "function" or type(mouse2release) ~= "function" then return false end
+    local ok = false
+    pcall_(function()
+        local vps = camera.ViewportSize
+        local cx, cy = vps.X * 0.5, vps.Y * 0.5
+        for _ = 1, 5 do
+            local sp, on = WorldToScreen(pos)
+            if on and sp and mabs(sp.X - cx) < vps.X * 0.22 and mabs(sp.Y - cy) < vps.Y * 0.22 then
+                ok = true
+                break
+            end
+            LSM.lastBot = tick_()
+            mouse2press()
+            if on and sp then
+                mousemoverel(mfloor((sp.X - cx) * 0.4), mfloor((sp.Y - cy) * 0.4))
+            else
+                mousemoverel(0, 200)   -- цель за кадром: ведём взгляд вниз
+            end
+            mouse2release()
+            task_wait(0.03)
+        end
+    end)
+    pcall_(function() mouse2release() end)   -- страховка: ПКМ не должен залипнуть
+    return ok
 end
 
 -- v12: умный возврат после АФК-фарма. Порядок важен:
@@ -1790,7 +1791,7 @@ _wrap("cash-farm", function()
                     pcall_(function() parent.Position = headPos end)
                 end
             end
-            task_wait(0.3)
+            task_wait(CFG.slow and 0.6 or 0.3)
         else
             task_wait(0.2)
         end
@@ -1809,8 +1810,14 @@ local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawin
 
 local function pollInput()
     if not ScriptActive then return end
-    local focused = _windowFocused()
     local nowA = tick_()
+    -- v18.16: опрос ввода ~30 раз/сек, не каждый кадр. Каждое чтение клавиши/
+    -- мыши - бридж-вызов эмулятора (их тут 8-9 за проход); на слабых ПК
+    -- по-кадровый опрос сам по себе ел кадры. 33мс задержка для АФК-детекта
+    -- и хоткеев неощутима.
+    if (nowA - (S.pollT or 0)) < (CFG.slow and 0.06 or 0.03) then return end
+    S.pollT = nowA
+    local focused = _windowFocused()
 
     if focused then
         -- фоллбэк-хоткеи 1-5 (только без homesick, иначе двойное срабатывание)
@@ -1884,8 +1891,8 @@ local function pollInput()
 
     -- v18.15: всё ниже (статус-строки, чтение лейблов лозы, таймер минигейма)
     -- обновляется ~7 раз/сек, а не каждый кадр - заметная часть лагов меню у
-    -- людей. Ввод/активность выше остались по-кадровыми.
-    if (nowA - (S.statusT or 0)) < 0.15 then return end
+    -- людей. Ввод/активность выше остались частыми.
+    if (nowA - (S.statusT or 0)) < (CFG.slow and 0.4 or 0.15) then return end
     S.statusT = nowA
 
     -- Статус-строки с делеями: лимонка + стенд + лоза
@@ -2190,7 +2197,7 @@ _wrap("auto-deal", function()
                 task_wait(1)
             end)
         end
-        task_wait(0.5)
+        task_wait(CFG.slow and 1.2 or 0.5)
     end
 end)
 
@@ -2511,7 +2518,7 @@ _wrap("auto-minigame", function()
                 task_wait(0.3)
             end)
         end
-        task_wait(0.2)
+        task_wait(CFG.slow and 0.5 or 0.2)
     end
 end)
 
