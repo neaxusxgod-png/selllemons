@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.3 — фикс таймера по кругу | тайминги v5.21 (без лагов GUI) | кнопки 6/7/8 и ручные корды убраны ]] --
+-- [[ SELL LEMONS v12.4 — лимонная тема меню | красивые тексты | свой футер без версии ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -191,7 +191,19 @@ end
 local homesick
 do
     local ok, err = pcall_(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/sharedechoes/Matcha-Luas/refs/heads/main/homesick.lua"))()
+        local src = game:HttpGet("https://raw.githubusercontent.com/sharedechoes/Matcha-Luas/refs/heads/main/homesick.lua")
+        -- v12.4: лимонная тема + без ''v1.4.0'' в футере. Патчим исходник до
+        -- запуска; если либу обновят и строки изменятся - gsub молча пропустит.
+        src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(255, 214, 60),')
+        src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(33, 29, 17),')
+        src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(27, 24, 14),')
+        src = src:gsub('surface2 = c3%(44, 40, 37%),', 'surface2 = c3(45, 40, 22),')
+        src = src:gsub('surface3 = c3%(54, 50, 46%),', 'surface3 = c3(58, 51, 28),')
+        src = src:gsub('border = c3%(60, 55, 52%),', 'border = c3(78, 68, 36),')
+        src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(168, 154, 112),')
+        src = src:gsub('%(ProjectState%.badgeText %.%. " | v1%.4%.0"%)', '(ProjectState.badgeText)')
+        src = src:gsub('or "v1%.4%.0"', 'or ""')
+        loadstring(src)()
     end)
     homesick = _G.homesick
     if not homesick then pcall_(function() homesick = shared.homesick end) end
@@ -234,37 +246,37 @@ end
 -- ---- Окно ----
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
-    local window = homesick.createWindow("sell lemons", 420, 360)
+    local window = homesick.createWindow("Sell Lemons", 420, 360)
     pcall_(function() window:autoloadConfig("selllemons_config") end)
     pcall_(function() window:autoloadTheme("theme") end)
     UIRef.win = window
 
-    local tab1 = window:addTab("automation")
-    local left = tab1:addSection("automation", "Left")
+    local tab1 = window:addTab("Main")
+    local left = tab1:addSection("Farming", "Left")
 
-    UIRef.t.AutoBuy = left:addToggle("autoBuy", "auto buy", false, function(val)
+    UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
         autoBuyActive = val
         print("[Hub] toggle AutoBuy = " .. tostring_(val))
     end):addKeybind("1", "Toggle", true, function() end)
 
-    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "lemon farm", false, function(val)
+    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
         lemonFarmActive = val
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
-    UIRef.t.AutoStand = left:addToggle("autoStand", "auto stand", false, function(val)
+    UIRef.t.AutoStand = left:addToggle("autoStand", "Auto Stand", false, function(val)
         autoStandActive = val
         print("[Hub] toggle AutoStand = " .. tostring_(val))
     end):addKeybind("3", "Toggle", true, function() end)
 
-    UIRef.t.CashFarm = left:addToggle("cashFarm", "cash farm", false, function(val)
+    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", false, function(val)
         cashFarmActive = val
         print("[Hub] toggle CashFarm = " .. tostring_(val))
     end):addKeybind("4", "Toggle", true, function() end)
 
-    local right = tab1:addSection("other", "Right")
+    local right = tab1:addSection("Control", "Right")
 
-    UIRef.t.StopAll = right:addToggle("stopAll", "stop all", false, function(val)
+    UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
         if val then
             stopAll()
             task.delay(0.1, function()
@@ -278,6 +290,7 @@ if homesick then
         end)
     end)
 
+    pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
     window.visible = true
     window:render()
     print("[Hub] homesick UI loaded - keys 1-5 via keybinds")
