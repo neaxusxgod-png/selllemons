@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.5 — лимонка откатана к золотой версии (зум + единый блок + CanQuery как было) ]] --
+-- [[ SELL LEMONS v13.6 — Auto Deal v2: телефон по кнопке отказа, жмём верхнюю (текст любой) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2492,44 +2492,68 @@ _wrap("auto-deal", function()
         end
         return cur ~= nil
     end
+    -- v13.6: тексты кнопок КАЖДЫЙ РАЗ разные (Deal./Roger./...), но нижняя
+    -- всегда отказ (No./Nvm.). Находим телефон по отказу, жмём ВЕРХНЮЮ кнопку
+    -- блока. Кнопки могут быть ImageButton с TextLabel внутри.
+    local function btnText(b)
+        local t
+        pcall_(function() t = b.Text end)
+        if t and t ~= "" then return tostring_(t) end
+        pcall_(function()
+            for _, c in ipairs_(b:GetDescendants()) do
+                if c:IsA("TextLabel") then t = c.Text break end
+            end
+        end)
+        return tostring_(t or "")
+    end
+    local function isReject(s)
+        s = s:lower():gsub("[%s%.%!]", "")
+        return s == "no" or s == "nvm"
+    end
     while ScriptActive do
         if autoDealActive then
             pcall_(function()
-                local btn = LSM.dealBtn
-                if not (btn and btn.Parent) then
-                    btn = nil
+                local pg = player:FindFirstChildOfClass("PlayerGui")
+                if not pg then return end
+                local cont = LSM.dealRoot
+                if not (cont and cont.Parent) then
+                    cont = nil
                     if (tick_() - (LSM.dealScanT or 0)) > 2 then
                         LSM.dealScanT = tick_()
-                        local pg = player:FindFirstChildOfClass("PlayerGui")
-                        if pg then
-                            for _, d in ipairs_(pg:GetDescendants()) do
-                                if d:IsA("TextButton") then
-                                    local tt = tostring_(d.Text)
-                                    if tt == "Deal." or tt:lower():match("^%s*deal%.?%s*$") then
-                                        btn = d
-                                        break
-                                    end
-                                end
+                        for _, d in ipairs_(pg:GetDescendants()) do
+                            if (d:IsA("TextButton") or d:IsA("ImageButton")) and isReject(btnText(d)) then
+                                cont = d.Parent
+                                break
                             end
                         end
-                        LSM.dealBtn = btn
+                        LSM.dealRoot = cont
                     end
                 end
-                if btn and btn.Parent and shown(btn) then
-                    LSM.lastBot = tick_()
-                    _clickGuiButton(btn)
-                    task_wait(0.3)
-                    if btn.Parent and shown(btn) then
-                        local apos = btn.AbsolutePosition
-                        local asz  = btn.AbsoluteSize
-                        local inset = 0
-                        pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
-                        LSM.lastBot = tick_()
-                        mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
-                        mouse1click()
+                if cont and cont.Parent then
+                    local best, bestY
+                    for _, s in ipairs_(cont:GetChildren()) do
+                        if (s:IsA("TextButton") or s:IsA("ImageButton")) and shown(s) then
+                            local y = s.AbsolutePosition.Y
+                            if not bestY or y < bestY then bestY = y; best = s end
+                        end
                     end
-                    rprint("[Deal] accepted")
-                    task_wait(1)
+                    if best and not isReject(btnText(best)) then
+                        LSM.lastBot = tick_()
+                        _clickGuiButton(best)
+                        task_wait(0.3)
+                        if best.Parent and shown(best) then
+                            local apos = best.AbsolutePosition
+                            local asz  = best.AbsoluteSize
+                            local inset = 0
+                            pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+                            LSM.lastBot = tick_()
+                            mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
+                            mouse1click()
+                            task_wait(0.1)
+                        end
+                        rprint("[Deal] accepted: " .. btnText(best))
+                        task_wait(1)
+                    end
                 end
             end)
         end
