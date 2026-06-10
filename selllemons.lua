@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v17 — Auto Minigame (PLAY E -> PICK -> спам CHEER) + стенд ТП перед стендом ]] --
+-- [[ SELL LEMONS v17.1 — минигейм без AFK-гейта (жмёт E сразу) | Stands одна секция ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -398,15 +398,13 @@ if homesick then
     -- автоконфигом homesick. Имена берём из живого тайкуна, иначе фоллбэк-список.
     pcall_(function()
         local standTab = window:addTab("Stands")
-        local sLeft = standTab:addSection("Auto Upgrade", "Left")
-        local sRight = standTab:addSection("Auto Upgrade", "Right")
+        -- v17.1: одна секция (раньше было две "Auto Upgrade" - выглядело дублем)
+        local sec = standTab:addSection("Auto Upgrade", "Left")
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
         if #listed == 0 then listed = STAND_NAMES end
-        local half = mfloor((#listed + 1) / 2)
-        for i, nm in ipairs_(listed) do
+        for _, nm in ipairs_(listed) do
             if standEnabled[nm] == nil then standEnabled[nm] = true end   -- не затираем коллбэк автоконфига
-            local sec = (i <= half) and sLeft or sRight
             sec:addCheckbox("stand_" .. nm, nm, true, function(val)
                 standEnabled[nm] = val
             end)
@@ -2899,18 +2897,18 @@ _wrap("auto-minigame", function()
                     end
                     return   -- экран итогов/Exit - ждём
                 end
-                -- не в минигейме: ТП к скамейке + E (только когда AFK, чтоб не дёргать)
-                if (tick_() - (S.lastUser or 0)) >= CFG.afkDelay then
-                    local pos = MG.entryPos()
-                    if pos and _tpHrpTo(pos) then
-                        LSM.standBusyT = tick_()
-                        for _ = 1, 8 do
-                            if not MG.active then break end
-                            keypress(0x45); task_wait(0.03); keyrelease(0x45); task_wait(0.03)
-                        end
-                        task_wait(0.5)
-                    end
+                -- v17.1: не в минигейме -> ТП к скамейке + спам E (PLAY). БЕЗ
+                -- AFK-гейта: включил тоггл = играем (ты сам так решил). Жмём E и
+                -- стоя на месте (вдруг уже у скамейки), и после ТП.
+                LSM.standBusyT = tick_()
+                local pos = MG.entryPos()
+                if pos then pcall_(function() _tpHrpTo(pos) end) end
+                for _ = 1, 14 do
+                    if not MG.active then break end
+                    if MG.root() and MG.shown(MG.root()) then break end   -- минигейм пошёл
+                    keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
+                task_wait(0.3)
             end)
         end
         task_wait(0.2)
