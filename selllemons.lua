@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.9 — мгновенный старт лимонки (CanQuery batched) | лоза ТП по позиции ]] --
+-- [[ SELL LEMONS v13 — таймер лозы читается ИЗ ИГРЫ (текст замка), секунда в секунду ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2380,7 +2380,55 @@ local function pollInput()
         end
         LSM.vineWasReady = vReady
     end
-    if vReady == true then
+    -- v13: НАСТОЯЩИЙ таймер - игра сама рисует отсчёт на замке (TextLabel
+    -- ''02:32:08'' под Map.Sewer.CashVine). Читаем его текст напрямую.
+    local vTimer
+    pcall_(function()
+        local lbl = LSM.vineLblRef
+        if lbl and lbl.Parent then
+            local t = tostring_(lbl.Text)
+            if t:match("^%d+:%d%d:%d%d$") then vTimer = t end
+        end
+        if not vTimer and (tick_() - (LSM.vineScanT or 0)) > 3 then
+            LSM.vineScanT = tick_()
+            LSM.vineLblRef = nil
+            local map = Workspace:FindFirstChild("Map")
+            local sewer = map and map:FindFirstChild("Sewer")
+            local cv = sewer and sewer:FindFirstChild("CashVine")
+            if cv then
+                for _, d in ipairs_(cv:GetDescendants()) do
+                    if d:IsA("TextLabel") then
+                        local t2 = tostring_(d.Text)
+                        if t2:match("^%d+:%d%d:%d%d$") then
+                            LSM.vineLblRef = d
+                            vTimer = t2
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    if vTimer then
+        -- синхронизируем локальную оценку с настоящим временем (для оффлайна)
+        pcall_(function()
+            local hh, mm, ss = vTimer:match("^(%d+):(%d%d):(%d%d)$")
+            local remS = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
+            local newT = tick_() - (CFG.vineCd - remS)
+            if not CFG.vineT or mabs(newT - CFG.vineT) > 60 then
+                CFG.vineT = newT
+                if type(writefile) == "function" then
+                    writefile("selllemons_vine.txt", tostring_(CFG.vineT))
+                end
+            end
+        end)
+    end
+    if vTimer then
+        statusTx3.Text = "cash vine  |  " .. vTimer
+        statusTx3.Color = C3rgb(222, 210, 170)
+        statusTx3.Position = Vec2(vx, sy)
+        statusTx3.Visible = true
+    elseif vReady == true then
         statusTx3.Text = "cash vine  |  READY"
         statusTx3.Color = C3rgb(255, 214, 60)
         if not CFG.vineNotif then
@@ -2391,7 +2439,7 @@ local function pollInput()
         statusTx3.Visible = true
     elseif CFG.vineT and (CFG.vineCd - (tick_() - CFG.vineT)) > 0 then
         local rem = CFG.vineCd - (tick_() - CFG.vineT)
-        statusTx3.Text = sformat("cash vine  |  %dh %02dm", mfloor(rem / 3600), mfloor((rem % 3600) / 60))
+        statusTx3.Text = sformat("cash vine  |  ~%dh %02dm", mfloor(rem / 3600), mfloor((rem % 3600) / 60))
         statusTx3.Color = C3rgb(222, 210, 170)
         statusTx3.Position = Vec2(vx, sy)
         statusTx3.Visible = true
