@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v17.2 — стеклянное меню (прозрачные фоны, чёткий текст) ]] --
+-- [[ SELL LEMONS v18 — возврат камеры намеренный | стенд смотрит вниз+отдаляет | стенд-ожидание прерываемое ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v15 ===")
+print("=== SELL LEMONS v18 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -1668,12 +1668,25 @@ local function runLocationsPass(firstRun)
             print("[Stand] " .. s.name .. (standEnabled[s.name] == false and "  OFF" or "  ON"))
         end
     end
+    -- v18: стенд = зеркало лемона. Отдаляем камеру (третье лицо, НЕ первое) один
+    -- раз за пасс, чтобы было видно стенды сверху.
+    LSM.zoom(-1)
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
         if standEnabled[s.name] ~= false then
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
+                -- v18: НАМЕРЕННО смотрим ВНИЗ на стенд (зеркально лемону - тот вверх).
+                -- Камера сверху-сзади, взгляд на стенд. Повторяем lookAt в цикле,
+                -- иначе дефолтная камера 3-го лица сразу снесёт ракурс.
+                local eye = s.pos + Vec3(0, 14, 10)
+                for _ = 1, 10 do
+                    if not autoStandActive then break end
+                    LSM.lastBot = tick_()
+                    pcall_(function() camera.lookAt(eye, s.pos) end)
+                    task_wait(0.03)
+                end
                 task_wait(STAND_TP_SETTLE)
                 _spamKeyFor(STAND_KEY, STAND_E_SPAM_DURATION, STAND_E_SPAM_INTERVAL)
                 tapped = tapped + 1
@@ -2127,7 +2140,16 @@ function LSM.returnHome()
             end
         end)
     end
+    -- v18: НАМЕРЕННО отдаляем камеру обратно - зум-аут С ЗАПАСОМ (scroll всегда
+    -- работает, не как mousemoverel в 3-м лице), гарантированно выходим из 1-го
+    -- лица. Потом восстанавливаем точный ракурс.
     LSM.zoom(-1)
+    LSM.lastBot = tick_()
+    if type(mousescroll) == "function" then
+        pcall_(function()
+            for _ = 1, 12 do mousescroll(-CFG.zoomStep); task_wait(0.012) end
+        end)
+    end
     if a and LSM.anchorCam then
         pcall_(function()
             camera.lookAt(a + LSM.anchorCam, a)
@@ -2960,9 +2982,16 @@ _wrap("auto-stand", function()
             task_wait(0.05)
             continue
         end
-        local rest = lemonFarmActive and CFG.standRest or STAND_LOOP_DELAY
-        LSM.standNextT = tick_() + rest   -- v11.1: для статус-строки
-        task_wait(rest)
+        -- v18: ПРЕРЫВАЕМОЕ ожидание. Раньше task_wait(60) блокировал на всю
+        -- минуту - выключил лемон, а стенд всё равно ждёт минуту. Теперь длину
+        -- паузы пересчитываем вживую: лемон выключили -> ждём только STAND_LOOP_DELAY.
+        local t0 = tick_()
+        while ScriptActive and autoStandActive do
+            local rest = lemonFarmActive and CFG.standRest or STAND_LOOP_DELAY
+            LSM.standNextT = t0 + rest
+            if (tick_() - t0) >= rest then break end
+            task_wait(0.25)
+        end
     end
 end)
 
