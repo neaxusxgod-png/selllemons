@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.13 — стенд первое лицо смотрит вниз | EXIT неск.высот | таймер локальный (видно всегда) ]] --
+-- [[ SELL LEMONS v18.14 — стенд ОТДАЛЯЕТ камеру + смотрит вниз | лемон возврат в 1-е лицо ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.13 ===")
+print("=== SELL LEMONS v18.14 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -1798,11 +1798,9 @@ local function runLocationsPass(firstRun)
             print("[Stand] " .. s.name .. (standEnabled[s.name] == false and "  OFF" or "  ON"))
         end
     end
-    -- v18.13: стенд в ПЕРВОМ ЛИЦЕ и смотрит ВНИЗ НА ПОЛ (как просил). В 3-м лице
-    -- lookAt мелькал и не держался ("экран мелькает, ничего не двигается"); в 1-м
-    -- лице держится - как у лемона. Зумим В первое лицо. Бонус: лемон после стенда
-    -- остаётся в 1-м лице (стенд больше не отдаляет) -> собирает дальше.
-    LSM.zoom(1)
+    -- v18.14: стенд ОТДАЛЯЕТ камеру (третье лицо, как просил) и смотрит ВНИЗ на
+    -- стенд - камера сверху-сзади над игроком. lookAt держим прямо перед каждым E.
+    LSM.zoom(-1)
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
@@ -1810,15 +1808,14 @@ local function runLocationsPass(firstRun)
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
                 task_wait(0.05)
-                -- камера от лица игрока ВНИЗ-ВПЕРЁД (на пол перед стендом), держим
-                -- lookAt прямо перед каждым E (как лемон: навёл -> сразу действие).
+                -- камера СВЕРХУ-СЗАДИ над игроком, взгляд ВНИЗ на стенд (отдалённо).
                 local eye, target
                 pcall_(function()
                     local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                     if h then
                         local p = h.Position
-                        eye = p + Vec3(0, 1.5, 0)
-                        target = p + Vec3(0, -7, 6)   -- вниз и чуть вперёд = на пол
+                        eye = p + Vec3(0, 10, 16)     -- выше и за спиной = отдалено
+                        target = p + Vec3(0, -1, 2)    -- смотрим вниз на стенд
                     end
                 end)
                 _standIsTapping = true   -- автобай-воркер уступает на время спама
@@ -1834,6 +1831,13 @@ local function runLocationsPass(firstRun)
             end
             task_wait(STAND_CYCLE_PAUSE)
         end
+    end
+    -- v18.14: стенд отдалял камеру -> верни лемону ПЕРВОЕ ЛИЦО, иначе он не
+    -- собирает. Сброс annAfk заставит лемон заново зайти в АФК-режим (зум в 1-е
+    -- лицо). Якорь возврата защищён ('if not LSM.anchor' в лемон-блоке).
+    if lemonFarmActive then
+        LSM.zoom(1)
+        LSM.annAfk = false
     end
     if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
     return "done"
