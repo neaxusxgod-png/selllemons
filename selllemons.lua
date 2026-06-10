@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.4 — таймер минигейма (живой лейбл) в статусе + не играет на кулдауне ]] --
+-- [[ SELL LEMONS v18.5 — CHEER непрерывный спам | стенд камера сверху держится каждый кадр ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1729,17 +1729,21 @@ local function runLocationsPass(firstRun)
         if standEnabled[s.name] ~= false then
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
-                -- v18.3: камера ПРЯМО СВЕРХУ (вид сверху-вниз, как ты просил).
-                -- Держим lookAt ВЕСЬ E-спам (иначе дефолтная камера снесёт за кадр)
-                -- + жмём E в том же цикле. eye высоко над стендом, лёгкий наклон.
-                local eye = s.pos + Vec3(0, 28, 6)
+                -- v18.5: камера ПРЯМО СВЕРХУ. lookAt КАЖДЫЙ кадр (раньше раз в
+                -- 0.04с - дефолтная камера успевала сносить вид, выходил лёгкий
+                -- наклон "на 10"). Теперь у неё нет свободного кадра -> держится.
+                local eye = s.pos + Vec3(0, 32, 8)
                 _standIsTapping = true   -- автобай-воркер уступает на время спама
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
-                    if not _windowFocused() then break end
                     LSM.lastBot = tick_()
-                    pcall_(function() camera.lookAt(eye, s.pos) end)   -- держим вид сверху
-                    keypress(STAND_KEY); task_wait(0.02); keyrelease(STAND_KEY); task_wait(0.02)
+                    pcall_(function() camera.lookAt(eye, s.pos) end)
+                    if _windowFocused() then keypress(STAND_KEY) end
+                    task_wait()
+                    LSM.lastBot = tick_()
+                    pcall_(function() camera.lookAt(eye, s.pos) end)
+                    keyrelease(STAND_KEY)
+                    task_wait()
                 end
                 _standIsTapping = false
                 tapped = tapped + 1
@@ -3008,6 +3012,35 @@ function MG.clickSlots()
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
+-- v18.5: НЕПРЕРЫВНЫЙ супербыстрый спам CHEER. Встаём на кнопку ОДИН раз, дальше
+-- жмём мышь каждый кадр без движений курсора и без пауз - максимально часто.
+-- Каждые 16 кликов проверяем, что кнопка ещё CHEER (не "exit"/исчезла = гонка всё).
+function MG.spamCheer(btn)
+    local ap, az
+    pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
+    if not ap or not az then return end
+    if ap.X <= 1 and ap.Y <= 1 then return end
+    local inset = 0
+    pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2 + inset)
+    local ox, oy = S.mx, S.my
+    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+    pcall_(function() mousemoveabs(cx, cy) end)   -- встаём на CHEER один раз
+    local n = 0
+    while MG.active and ScriptActive do
+        LSM.lastBot = tick_()
+        pcall_(function() mouse1press(); mouse1release(); mouse1press(); mouse1release() end)
+        n = n + 1
+        if n % 16 == 0 then
+            local ok, still = pcall_(function() return btn.Parent and MG.text(btn):find("CHEER") end)
+            if not (ok and still) then break end   -- гонка кончилась / кнопка пропала
+            pcall_(function() mousemoveabs(cx, cy) end)   -- держим курсор на кнопке
+            LSM.standBusyT = tick_()
+        end
+        task_wait()   -- один кадр = максимально быстро
+    end
+    pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
+end
 _wrap("auto-minigame", function()
     while ScriptActive do
         if MG.active then
@@ -3016,11 +3049,7 @@ _wrap("auto-minigame", function()
                 local cheer = MG.findBtn("CHEER", true)
                 if cheer then
                     LSM.standBusyT = tick_()   -- идёт гонка -> лимонка/стенд не лезут
-                    for _ = 1, 12 do
-                        if not MG.active then break end
-                        MG.click(cheer)
-                        task_wait(0.04)
-                    end
+                    MG.spamCheer(cheer)        -- v18.5: НЕПРЕРЫВНЫЙ супербыстрый спам
                     return
                 end
                 -- 2) ВЫБОР: есть PICK-экран? (ищем даже кнопки с поз 0,0)
