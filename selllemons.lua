@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.8 — фикс фриза: стенд-камера и CHEER теперь ~20/сек, не каждый кадр ]] --
+-- [[ SELL LEMONS v18.9 — минигейм цикл: EXIT + чек + рестарт по таймеру | Trade = coming soon ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.7 ===")
+print("=== SELL LEMONS v18.9 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -504,11 +504,17 @@ if homesick then
         if #mgList > 0 then
             local mgSec = autoTab:addSection("Minigames", "Right")
             for _, nm in ipairs_(mgList) do
-                if MG.enabled[nm] == nil then MG.enabled[nm] = true end
-                UIRef.miniCb[nm] = mgSec:addCheckbox("mini_" .. nm, nm, true, function(val)
-                    MG.enabled[nm] = val
-                    S.saveState()
-                end)
+                local soon = nm:lower():find("trade") and true or false   -- Trade пока не готов
+                if soon then
+                    MG.enabled[nm] = false
+                    mgSec:addCheckbox("mini_" .. nm, nm .. " (soon)", false, function() end)
+                else
+                    if MG.enabled[nm] == nil then MG.enabled[nm] = true end
+                    UIRef.miniCb[nm] = mgSec:addCheckbox("mini_" .. nm, nm, true, function(val)
+                        MG.enabled[nm] = val
+                        S.saveState()
+                    end)
+                end
             end
         end
     end)
@@ -3051,7 +3057,8 @@ function MG.entryPos()
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
-            if MG.enabled[nm] ~= false then   -- только включённые минигеймы
+            -- v18.9: Trade пока НЕ играем (coming soon) - жёстко пропускаем
+            if MG.enabled[nm] ~= false and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
                         pos = _standPartPos(d.Parent); return
@@ -3115,33 +3122,83 @@ function MG.spamCheer(btn)
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
+-- v18.9: после гонки -> экран "YOU GOT ...! EXIT" (resultUp) -> жмём EXIT ->
+-- вылазит ЧЕК (Popup.Check) -> клик по центру, забираем деньги. Потом кулдаун
+-- 5 мин, и если включено - стартуем заново (ветка входа при cd<=0).
+function MG.resultUp()
+    local pg = player:FindFirstChildOfClass("PlayerGui")
+    local mr = pg and pg:FindFirstChild("MinigameRace")
+    if not mr then return false end
+    local found = false
+    pcall_(function()
+        for _, d in ipairs_(mr:GetDescendants()) do
+            if tostring_(d.ClassName) == "TextLabel" then
+                local t; pcall_(function() t = d.Text end)
+                t = tostring_(t or ""):upper()
+                if t:find("REWARD") or t:find("GOT") or t:find("PLACE") then found = true; return end
+            end
+        end
+    end)
+    return found
+end
+function MG.checkUp()
+    local pg = player:FindFirstChildOfClass("PlayerGui")
+    local popup = pg and pg:FindFirstChild("Popup")
+    local chk = popup and popup:FindFirstChild("Check")
+    return (chk and MG.shown(chk)) or false
+end
+function MG.clickCenter()
+    local vw, vh = 1920, 1080
+    pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
+    local ox, oy = S.mx, S.my
+    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+    LSM.lastBot = tick_()
+    pcall_(function()
+        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5))
+        mouse1press(); mouse1release()
+    end)
+    pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
+end
 _wrap("auto-minigame", function()
     while ScriptActive do
         if MG.active then
             pcall_(function()
-                -- 1) ГОНКА: кнопка CHEER (только когда текст реально "cheer", не "exit")
+                -- 1) ГОНКА: CHEER -> непрерывный спам
                 local cheer = MG.findBtn("CHEER", true)
                 if cheer then
-                    LSM.standBusyT = tick_()   -- идёт гонка -> лимонка/стенд не лезут
-                    MG.spamCheer(cheer)        -- v18.5: НЕПРЕРЫВНЫЙ супербыстрый спам
+                    LSM.standBusyT = tick_()
+                    MG.spamCheer(cheer)
                     return
                 end
-                -- 2) ВЫБОР: есть PICK-экран? PICK = билборды (поз ненадёжна) ->
-                -- ВСЕГДА кликаем по экранным долям несколькими рядами.
+                -- 2) ЧЕК на экране -> клик по центру (забрать деньги)
+                if MG.checkUp() then
+                    LSM.standBusyT = tick_()
+                    MG.clickCenter()
+                    task_wait(0.5)
+                    return
+                end
+                -- 3) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT
+                if MG.resultUp() then
+                    LSM.standBusyT = tick_()
+                    local exitb = MG.findBtn("EXIT", true)
+                    if exitb then MG.click(exitb) end
+                    task_wait(0.5)
+                    return
+                end
+                -- 4) ВЫБОР: PICK (билборды) -> клик по экранным долям
                 if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
                     MG.clickSlots()
                     task_wait(0.4)
                     return
                 end
-                -- 3) КУЛДАУН? не заходим, ждём (таймер тикает в статусе)
+                -- 5) КУЛДАУН? ждём (таймер в статусе). cd<=0 -> ниже = СТАРТ заново
                 local cd = MG.timerSec()
                 if cd and cd > 0 then
                     task_wait(0.5)
                     return
                 end
-                -- на скамейке: клик по кнопке PLAY (если есть позиция) + спам E,
-                -- при необходимости ТП к скамейке включённого минигейма.
+                -- 6) ВХОД: PLAY/E у скамейки включённого минигейма
                 LSM.standBusyT = tick_()
                 local play = MG.findBtn("PLAY", true)
                 if play then MG.click(play) end
