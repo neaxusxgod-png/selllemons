@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.7 — БЕЗ зума (движок перетирал lookAt в 1-м лице) | лоза: точные корды + возврат тогглом ]] --
+-- [[ SELL LEMONS v12.8 — лоза: READY из реального состояния игры (VineKey), кулдаун с момента сбора ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2287,16 +2287,6 @@ local function pollInput()
                 h.AssemblyLinearVelocity = Vec3(0, 0, 0)
             end
         end)
-        -- таймер НЕ перезаписываем, если уже тикает (зашёл просто проверить)
-        if not CFG.vineT or (tick_() - CFG.vineT) >= CFG.vineCd then
-            CFG.vineT = tick_()
-            CFG.vineNotif = false
-            pcall_(function()
-                if type(writefile) == "function" then
-                    writefile("selllemons_vine.txt", tostring_(CFG.vineT))
-                end
-            end)
-        end
         rprint("[Vine] at the vine - toggle OFF to return")
     end
     if CFG.vineBack then
@@ -2355,19 +2345,47 @@ local function pollInput()
     else
         statusTx2.Visible = false
     end
-    if CFG.vineT then
-        local rem = CFG.vineCd - (tick_() - CFG.vineT)
-        if rem > 0 then
-            statusTx3.Text = sformat("cash vine  |  %dh %02dm", mfloor(rem / 3600), mfloor((rem % 3600) / 60))
-            statusTx3.Color = C3rgb(222, 210, 170)
-        else
-            statusTx3.Text = "cash vine  |  READY"
-            statusTx3.Color = C3rgb(255, 214, 60)
-            if not CFG.vineNotif then
-                CFG.vineNotif = true
-                pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
-            end
+    -- v12.8: РЕАЛЬНОЕ состояние лозы из игры: VineKey видим = готова
+    -- (нашли зондом: Workspace.Map.Sewer.CashVine.VineKey, Transparency 1<->0).
+    -- Переход видим->невидим = момент сбора: настоящий старт 4ч кулдауна.
+    local vReady
+    pcall_(function()
+        local k = LSM.vineKeyRef
+        if not (k and k.Parent) then
+            local map = Workspace:FindFirstChild("Map")
+            local sewer = map and map:FindFirstChild("Sewer")
+            local cv = sewer and sewer:FindFirstChild("CashVine")
+            k = cv and cv:FindFirstChild("VineKey")
+            LSM.vineKeyRef = k
         end
+        if k then vReady = (k.Transparency < 0.5) end
+    end)
+    if vReady ~= nil then
+        if LSM.vineWasReady == true and vReady == false then
+            CFG.vineT = tick_()
+            CFG.vineNotif = false
+            pcall_(function()
+                if type(writefile) == "function" then
+                    writefile("selllemons_vine.txt", tostring_(CFG.vineT))
+                end
+            end)
+            rprint("[Vine] collected -> 4h cooldown started")
+        end
+        LSM.vineWasReady = vReady
+    end
+    if vReady == true then
+        statusTx3.Text = "cash vine  |  READY"
+        statusTx3.Color = C3rgb(255, 214, 60)
+        if not CFG.vineNotif then
+            CFG.vineNotif = true
+            pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
+        end
+        statusTx3.Position = Vec2(vx, sy)
+        statusTx3.Visible = true
+    elseif CFG.vineT and (CFG.vineCd - (tick_() - CFG.vineT)) > 0 then
+        local rem = CFG.vineCd - (tick_() - CFG.vineT)
+        statusTx3.Text = sformat("cash vine  |  %dh %02dm", mfloor(rem / 3600), mfloor((rem % 3600) / 60))
+        statusTx3.Color = C3rgb(222, 210, 170)
         statusTx3.Position = Vec2(vx, sy)
         statusTx3.Visible = true
     else
