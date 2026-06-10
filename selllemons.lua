@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v14.2 — Auto Deal: невидимый клик (прыжок+нажатие+возврат в один проход) ]] --
+-- [[ SELL LEMONS v15 — выбор стендов (вкладка Stands) + ТП по Locations (свой тайкун, любой игрок) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v11 ===")
+print("=== SELL LEMONS v15 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -252,6 +252,39 @@ local function toggleFeature(slot)
     print("[Hub] toggle slot " .. slot)
 end
 
+-- v15: выбор стендов для авто-апгрейда. Позиции читаются из myTycoon.Locations
+-- В РАНТАЙМЕ - у каждого игрока свой тайкун в своём месте, корды разные.
+local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
+local standEnabled = {}
+local function _standPartPos(c)
+    local pos
+    pcall_(function() pos = c.Position end)
+    if pos then return pos end
+    pcall_(function()
+        for _, d in ipairs_(c:GetDescendants()) do
+            if d:IsA("BasePart") then pos = d.Position; return end
+        end
+    end)
+    if not pos then pcall_(function() if c.PrimaryPart then pos = c.PrimaryPart.Position end end) end
+    return pos
+end
+local function getStandLocations()
+    local out = {}
+    if not myTycoon then return out end
+    local loc
+    pcall_(function() loc = myTycoon:FindFirstChild("Locations") end)
+    if not loc then return out end
+    for _, c in ipairs_(loc:GetChildren()) do
+        local nm = tostring_(c.Name)
+        local low = nm:lower()
+        if low:find("lemon") and not low:find("lemonx") then
+            local pos = _standPartPos(c)
+            if pos then tinsert(out, {name = nm, pos = pos}) end
+        end
+    end
+    return out
+end
+
 -- ---- Окно ----
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
@@ -312,6 +345,25 @@ if homesick then
         task.delay(0.1, function()
             pcall_(function() UIRef.t.StopAll:SetValue(false) end)
         end)
+    end)
+
+    -- v15: вкладка выбора стендов (чекбокс на каждый). Состояние сохраняется
+    -- автоконфигом homesick. Имена берём из живого тайкуна, иначе фоллбэк-список.
+    pcall_(function()
+        local standTab = window:addTab("Stands")
+        local sLeft = standTab:addSection("Auto Upgrade", "Left")
+        local sRight = standTab:addSection("Auto Upgrade", "Right")
+        local listed = {}
+        for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
+        if #listed == 0 then listed = STAND_NAMES end
+        local half = mfloor((#listed + 1) / 2)
+        for i, nm in ipairs_(listed) do
+            if standEnabled[nm] == nil then standEnabled[nm] = true end   -- не затираем коллбэк автоконфига
+            local sec = (i <= half) and sLeft or sRight
+            sec:addCheckbox("stand_" .. nm, nm, true, function(val)
+                standEnabled[nm] = val
+            end)
+        end
     end)
 
     window.visible = true
@@ -1538,6 +1590,36 @@ local function tieredUpgrade(target, level)
     return false, "all_tiers_failed"
 end
 
+-- v15: апгрейд по Locations (реальные корды из СВОЕГО тайкуна) + селектор.
+-- Заменяет старый поиск пустышек из Purchases, который не давал позиции для ТП.
+local function runLocationsPass(firstRun)
+    local locs = getStandLocations()
+    if #locs == 0 then
+        if firstRun then print("[Stand] Locations пуст (тайкун не прогружен?)") end
+        return "done"
+    end
+    if firstRun then
+        for _, s in ipairs_(locs) do
+            print("[Stand] " .. s.name .. (standEnabled[s.name] == false and "  OFF" or "  ON"))
+        end
+    end
+    local tapped = 0
+    for _, s in ipairs_(locs) do
+        if not ScriptActive or not autoStandActive then return "off" end
+        if standEnabled[s.name] ~= false then
+            if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
+            if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
+                task_wait(STAND_TP_SETTLE)
+                _spamKeyFor(STAND_KEY, STAND_E_SPAM_DURATION, STAND_E_SPAM_INTERVAL)
+                tapped = tapped + 1
+            end
+            task_wait(STAND_CYCLE_PAUSE)
+        end
+    end
+    if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
+    return "done"
+end
+
 local function runStandPass(firstRun)
     local targets = getStandTargets(firstRun)
     if #targets == 0 then
@@ -2679,18 +2761,9 @@ _wrap("auto-stand", function()
             continue
         end
 
-        local res
-        if STAND_MODE == "manage" then
-            res = runManagePass(firstRun)
-            -- v7.4: Manage-меню не покрывает физические Lemon-стенды (туда надо
-            -- ТП и жать E). Раньше TP-пасс запускался только при ПУСТОМ Manage,
-            -- поэтому Lemon stand никогда не апгрейдился. Теперь обе пассы.
-            if res ~= "off" then
-                res = runStandPass(firstRun)
-            end
-        else
-            res = runStandPass(firstRun)
-        end
+        -- v15: только Locations-пасс (реальные корды из своего тайкуна + селектор).
+        -- Старые manage/stand пассы искали пустышки без позиций -> не тепало.
+        local res = runLocationsPass(firstRun)
         firstRun = false
         if res == "off" then
             task_wait(0.05)
