@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.4 — Control: тогглы сверху, разделитель, Stop All внизу ]] --
+-- [[ SELL LEMONS v13.5 — лимонка откатана к золотой версии (зум + единый блок + CanQuery как было) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1821,29 +1821,29 @@ local function findTreeOf(clickPart)
     return nil
 end
 
--- v12.9: ОДИН pcall вместо тысяч. pcall на каждую часть дерева давал
--- многосекундную задержку перед первым фруктом - камера ''не поднималась''
--- всё это время.
+-- v13.5: ВОЗВРАТ к оригиналу (золотая версия). Батч-вариант при ошибке на
+-- одной части бросал остальные части дерева -> клики втыкались в листву.
 local function disableTreeCanQuery(tree, excludeSet)
     local modified, n = {}, 0
-    pcall_(function()
-        for _, part in ipairs_(tree:GetDescendants()) do
-            if part:IsA("BasePart") and not excludeSet[part] and part.CanQuery then
-                part.CanQuery = false
-                n = n + 1
-                modified[n] = part
-            end
+    for _, part in ipairs_(tree:GetDescendants()) do
+        if part:IsA("BasePart") and not excludeSet[part] then
+            pcall_(function()
+                if part.CanQuery then
+                    part.CanQuery = false
+                    n = n + 1
+                    modified[n] = part
+                end
+            end)
         end
-    end)
+    end
     return modified, n
 end
 
 local function restoreTreeCanQuery(modified, n)
-    pcall_(function()
-        for i = 1, n do
-            modified[i].CanQuery = true
-        end
-    end)
+    for i = 1, n do
+        local part = modified[i]
+        pcall_(function() part.CanQuery = true end)
+    end
 end
 
 -- ==================== LEMON SILENT MODES (v7.4) ====================
@@ -1966,6 +1966,7 @@ function LSM.returnHome()
             end
         end)
     end
+    LSM.zoom(-1)
     if a and LSM.anchorCam then
         pcall_(function()
             camera.lookAt(a + LSM.anchorCam, a)
@@ -2004,14 +2005,15 @@ local function processLemon(v, hrp)
     -- дёргается только пока тебя нет.
     local vp = v.Position
     local tpX, tpY, tpZ = vp.X, vp.Y - 4, vp.Z
-    -- v12.6: шаги в РАЗДЕЛЬНЫХ pcall: раньше ошибка на ТП молча глотала
-    -- lookAt и клики - вот почему иногда ''не поднимал голову''
-    pcall_(function() hrp.CFrame = CF(tpX, tpY, tpZ) end)
-    task_wait(LEMON_TP_WAIT)
-    LSM.lastBot = tick_()
-    pcall_(function() camera.lookAt(Vec3(tpX, tpY, tpZ), vp) end)
-    task_wait(LEMON_CAM_WAIT)
+    -- v13.5: единый блок как в золотой версии
     pcall_(function()
+        hrp.CFrame = CF(tpX, tpY, tpZ)
+        task_wait(LEMON_TP_WAIT)
+
+        LSM.lastBot = tick_()
+        camera.lookAt(Vec3(tpX, tpY, tpZ), vp)
+        task_wait(LEMON_CAM_WAIT)
+
         local vps = camera.ViewportSize
         mousemoveabs(mfloor(vps.X / 2), mfloor(vps.Y / 2))
         mouse1click()
@@ -2125,18 +2127,9 @@ _wrap("lemon-farm", function()
                         LSM.anchorCam = camera.Position - h2.Position
                     end
                 end)
-                -- v12.7: БЕЗ зума! В настоящем 1-м лице Roblox сам держит
-                -- камеру и перетирает наш lookAt - голова не поднималась.
-                -- Оригинальный метод: камера ставится lookAt-ом на каждый фрукт.
-                print("[Lemon] AFK -> farm")
-                -- v12.9: поднять взгляд сразу, не дожидаясь первого фрукта
-                pcall_(function()
-                    local chrA = player.Character
-                    local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
-                    if hA then
-                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
-                    end
-                end)
+                -- v13.5: зум возвращён - так было в золотой версии
+                print("[Lemon] AFK -> zoom + farm")
+                LSM.zoom(1)
             else
                 print("[Lemon] input detected -> back to your spot")
                 LSM.returnHome()
