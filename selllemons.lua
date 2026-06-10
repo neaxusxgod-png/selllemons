@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.9 — минигейм цикл: EXIT + чек + рестарт по таймеру | Trade = coming soon ]] --
+-- [[ SELL LEMONS v18.10 — фикс: EXIT/чек только после гонки (не застревает на входе) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -3168,20 +3168,25 @@ _wrap("auto-minigame", function()
                 if cheer then
                     LSM.standBusyT = tick_()
                     MG.spamCheer(cheer)
+                    MG.raceEndT = tick_()   -- v18.10: гонка только что закончилась
                     return
                 end
-                -- 2) ЧЕК на экране -> клик по центру (забрать деньги)
-                if MG.checkUp() then
-                    LSM.standBusyT = tick_()
-                    MG.clickCenter()
-                    task_wait(0.5)
-                    return
-                end
-                -- 3) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT
-                if MG.resultUp() then
+                -- EXIT/ЧЕК обрабатываем ТОЛЬКО ~25с после гонки. Иначе checkUp/
+                -- resultUp ложно срабатывали на скрытых лейблах (видимость в Матче
+                -- ненадёжна) и цикл застревал, не доходя до входа в игру.
+                local justRaced = (tick_() - (MG.raceEndT or 0)) < 25
+                -- 2) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT
+                if justRaced and MG.resultUp() then
                     LSM.standBusyT = tick_()
                     local exitb = MG.findBtn("EXIT", true)
                     if exitb then MG.click(exitb) end
+                    task_wait(0.5)
+                    return
+                end
+                -- 3) ЧЕК на экране -> клик по центру (забрать деньги)
+                if justRaced and MG.checkUp() then
+                    LSM.standBusyT = tick_()
+                    MG.clickCenter()
                     task_wait(0.5)
                     return
                 end
