@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.2 — ТУРБО откачен (ломал покупки), автобай = чистая v5.21 ]] --
+-- [[ SELL LEMONS v12.3 — фикс таймера по кругу | тайминги v5.21 (без лагов GUI) | кнопки 6/7/8 и ручные корды убраны ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -524,11 +524,6 @@ local lastCashCount   = 0
 
 -- v7.4: режим сбора лимонов (автоопределяется на первых фруктах, см. ниже)
 local LSM = { mode = nil, annAfk = false, annBuy = false }   -- nil=детект | "cd" | "sig" | "touch" | "classic"; ann-флаги СРАЗУ false (nil давал ложный переход)
--- v7.7: ручные точки стендов — клавиша 6 запоминает позицию персонажа,
--- АвтоСтенд ТПшится в каждую и жмёт E. Корды печатаются для хардкода.
-local standManual = {
-    Vec3(34.0, 6.7, -359.0),   -- Lemon stand (оператор дал корды 2026-06-09)
-}
 
 local ANTIGRAV_VEL = Vec3(0, 2, 0)
 RunService.RenderStepped:Connect(function()
@@ -1656,7 +1651,7 @@ _wrap("autobuy-worker", function()
                     appendNewButtons()
                 end
             end
-            task_wait(0.03)
+            task_wait(0.05)
             continue
         end
 
@@ -1671,13 +1666,13 @@ _wrap("autobuy-worker", function()
         -- ломал покупки (пропуск кнопок). Ниже классика v5.21 один-в-один,
         -- та самая, что работала идеально. БОЛЬШЕ НЕ ТРОГАТЬ.
         pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
-        task_wait(0.02)
+        task_wait(0.03)
 
         local bought = false
         local t0 = tick_()
         while ScriptActive and (tick_() - t0) < CFG.buyWindow do
             pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-            task_wait(0.03)
+            task_wait(0.05)
             local gone = true
             pcall_(function()
                 gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
@@ -1920,17 +1915,6 @@ end
 -- 2) зум-аут из первого лица;
 -- 3) вернуть ракурс: камера на тот же оффсет от персонажа, что и до фарма.
 -- Якорь одноразовый (чистится), без якоря просто зум-аут.
--- v12.1: точки ТП ОТНОСИТЕЛЬНО тайкуна. Тайкуны у всех в разных местах
--- мира (и могут быть повёрнуты), абсолютные корды не переносятся. Храним
--- точку в локальных координатах пивота тайкуна: у любого игрока она
--- восстановится в ЕГО тайкуне. 7 = сохранить, 8 = ТП по кругу.
-function LSM.tycoonPivot()
-    if not myTycoon then return nil end
-    local cf
-    pcall_(function() cf = myTycoon:GetPivot() end)
-    return cf
-end
-
 function LSM.returnHome()
     local a = LSM.anchor
     LSM.anchor = nil
@@ -2244,93 +2228,21 @@ local function pollInput()
                 end
             end
         end
-        -- клавиша 6 — запомнить точку стенда (ТП + E)
-        if iskeypressed(54) then
-            if not S.keyDown[54] then
-                S.keyDown[54] = true
-                if UX.fire("cap6") then
-                    local chr6 = player.Character
-                    local hrp6 = chr6 and chr6:FindFirstChild("HumanoidRootPart")
-                    if hrp6 then
-                        local pp = hrp6.Position
-                        tinsert(standManual, Vec3(pp.X, pp.Y, pp.Z))
-                        print(sformat("[Stand] point #%d saved: %.1f, %.1f, %.1f", #standManual, pp.X, pp.Y, pp.Z))
-                        pcall_(function() notify("Stand point saved", "Sell Lemons", 2) end)
-                    end
-                end
-            end
-        else
-            S.keyDown[54] = false
-        end
-        -- клавиша 7 — сохранить ТП-точку (относительно тайкуна: сработает у всех)
-        if iskeypressed(55) then
-            if not S.keyDown[55] then
-                S.keyDown[55] = true
-                if UX.fire("cap7") then
-                    local piv = LSM.tycoonPivot()
-                    local chr7 = player.Character
-                    local hrp7 = chr7 and chr7:FindFirstChild("HumanoidRootPart")
-                    if piv and hrp7 then
-                        local rel
-                        pcall_(function() rel = piv:PointToObjectSpace(hrp7.Position) end)
-                        if not rel then pcall_(function() rel = hrp7.Position - piv.Position end) end
-                        if rel then
-                            LSM.tpPoints = LSM.tpPoints or {}
-                            tinsert(LSM.tpPoints, rel)
-                            rprint(sformat("[TP] point #%d saved (tycoon-relative): %.1f, %.1f, %.1f", #LSM.tpPoints, rel.X, rel.Y, rel.Z))
-                            pcall_(function() notify("TP point " .. #LSM.tpPoints .. " saved", "Sell Lemons", 2) end)
-                        else
-                            rprint("[TP] save failed: tycoon pivot not found")
-                        end
-                    end
-                end
-            end
-        else
-            S.keyDown[55] = false
-        end
-        -- клавиша 8 — ТП по сохранённым точкам (по кругу)
-        if iskeypressed(56) then
-            if not S.keyDown[56] then
-                S.keyDown[56] = true
-                if UX.fire("tp8") and LSM.tpPoints and #LSM.tpPoints > 0 then
-                    LSM.tpIdx = (LSM.tpIdx or 0) % #LSM.tpPoints + 1
-                    local piv = LSM.tycoonPivot()
-                    local chr8 = player.Character
-                    local hrp8 = chr8 and chr8:FindFirstChild("HumanoidRootPart")
-                    if piv and hrp8 then
-                        local wp
-                        pcall_(function() wp = piv:PointToWorldSpace(LSM.tpPoints[LSM.tpIdx]) end)
-                        if not wp then pcall_(function() wp = piv.Position + LSM.tpPoints[LSM.tpIdx] end) end
-                        if wp then
-                            pcall_(function()
-                                hrp8.CFrame = CF(wp.X, wp.Y + 1, wp.Z)
-                                hrp8.AssemblyLinearVelocity = Vec3(0, 0, 0)
-                            end)
-                            rprint("[TP] -> point " .. LSM.tpIdx .. "/" .. #LSM.tpPoints)
-                        end
-                    end
-                end
-            end
-        else
-            S.keyDown[56] = false
-        end
 
         -- активность игрока (пауза лимонки) — клики самой лимонки не считаются
         local mx, my = S.pmx, S.pmy
         if mouse then pcall_(function() mx = mouse.X; my = mouse.Y end) end
         local m1 = false
         pcall_(function() m1 = ismouse1pressed() end)
-        if (nowA - (LSM.lastBot or 0)) > 0.35 then
-            -- v12.1: мёртвая зона. ТП-ы автобая дёргают камеру и mouse.X/Y
-            -- дрейфует без движения руки -> таймер шёл по второму кругу.
-            -- Микро-сдвиг не активность; при работающем автобае порог выше.
+        -- v12.3: пока автобай реально покупает (и 1с после) - его ТП двигают
+        -- mouse.X/Y сами по себе, поэтому мышь и клик НЕ считаются активностью
+        -- (таймер шёл по кругу). Клавиши WASD/пробел будят фарм всегда.
+        if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then
+            S.busyT = nowA
+        end
+        if (nowA - (LSM.lastBot or 0)) > 0.35 and (nowA - (S.busyT or 0)) >= 1.0 then
             local moved = mabs(mx - S.pmx) + mabs(my - S.pmy)
-            local thresh = 3
-            if autoBuyActive and (#localQueue - queueIndex + 1) > 0
-               and (nowA - (S.lastUser or 0)) >= CFG.afkDelay then
-                thresh = 30
-            end
-            if moved > thresh or m1 then S.lastUser = nowA end
+            if moved > 3 or m1 then S.lastUser = nowA end
         end
         S.pmx, S.pmy = mx, my
         if iskeypressed(0x57) or iskeypressed(0x41) or iskeypressed(0x53) or iskeypressed(0x44) or iskeypressed(0x20) then
@@ -2422,18 +2334,6 @@ _wrap("auto-stand", function()
             -- поэтому Lemon stand никогда не апгрейдился. Теперь обе пассы.
             if res ~= "off" then
                 res = runStandPass(firstRun)
-            end
-            -- v7.7: ручные точки (клавиша 6): честный ТП + спам E
-            if autoStandActive and #standManual > 0 then
-                for mi = 1, #standManual do
-                    if not autoStandActive then break end
-                    local mp = standManual[mi]
-                    if _tpHrpTo(mp) then
-                        task_wait(STAND_TP_SETTLE)
-                        _spamKeyFor(STAND_KEY, STAND_E_SPAM_DURATION, STAND_E_SPAM_INTERVAL)
-                    end
-                    task_wait(STAND_CYCLE_PAUSE)
-                end
             end
         else
             res = runStandPass(firstRun)
