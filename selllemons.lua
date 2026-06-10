@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.9 — мгновенный старт лимонки при включении | тайм-слоты с автобаем (8с/цикл) ]] --
+-- [[ SELL LEMONS v14 — ПРОВЕРЯЕМЫЙ прицел (WorldToScreen + довод мышью) | КД 6с | слот 5с | свежая камера ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -171,7 +171,7 @@ end
 
 local CFG = {
     buyWindow = 0.45,   -- окно подтверждения покупки (worker)
-    afkDelay  = 5,      -- сек без инпута до старта лимонки
+    afkDelay  = 6,      -- сек без инпута до старта лимонки
     zoomTicks = 22,     -- щелчков скролла в первое лицо (лишние на максимуме безвредны)
     zoomStep  = 1,      -- если зум не в ту сторону - поставить -1
     standRest = 60,     -- АвтоСтенд проходится раз в минуту, когда лимонка включена
@@ -243,9 +243,7 @@ end
 local function toggleFeature(slot)
     if not UX.fire("slot" .. slot) then return end
     if     slot == 1 then autoBuyActive   = not autoBuyActive
-    elseif slot == 2 then
-        lemonFarmActive = not lemonFarmActive
-        if lemonFarmActive then S.lastUser = tick_() - CFG.afkDelay - 1 end
+    elseif slot == 2 then lemonFarmActive = not lemonFarmActive
     elseif slot == 3 then autoStandActive = not autoStandActive
     elseif slot == 4 then cashFarmActive  = not cashFarmActive
     elseif slot == 5 then stopAll(); return
@@ -272,7 +270,6 @@ if homesick then
 
     UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
         lemonFarmActive = val
-        if val then S.lastUser = tick_() - CFG.afkDelay - 1 end   -- v13.9: включил = фарми сразу
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
@@ -2022,7 +2019,7 @@ local function processLemon(v, hrp)
     -- дёргается только пока тебя нет.
     local vp = v.Position
     local tpX, tpY, tpZ = vp.X, vp.Y - 4, vp.Z
-    -- v13.5: единый блок как в золотой версии
+    -- золотой блок: ТП + lookAt (быстрая попытка)
     pcall_(function()
         hrp.CFrame = CF(tpX, tpY, tpZ)
         task_wait(LEMON_TP_WAIT)
@@ -2030,7 +2027,33 @@ local function processLemon(v, hrp)
         LSM.lastBot = tick_()
         camera.lookAt(Vec3(tpX, tpY, tpZ), vp)
         task_wait(LEMON_CAM_WAIT)
+    end)
 
+    -- v14: НАМЕРЕННАЯ ПРОВЕРКА прицела. Не верим lookAt на слово: через
+    -- WorldToScreen проверяем, что фрукт реально в кадре около центра.
+    -- Если нет - доворачиваем камеру РЕАЛЬНОЙ мышью (в 1-м лице mousemoverel
+    -- вращает взгляд, это не может не сработать) и перепроверяем. До 6 раз.
+    pcall_(function()
+        local vps = camera.ViewportSize
+        local cx, cy = vps.X * 0.5, vps.Y * 0.5
+        for _ = 1, 6 do
+            local sp, on = WorldToScreen(vp)
+            if on and sp and mabs(sp.X - cx) < vps.X * 0.18 and mabs(sp.Y - cy) < vps.Y * 0.18 then
+                break   -- прицел подтверждён: фрукт у центра кадра
+            end
+            LSM.lastBot = tick_()
+            if on and sp then
+                mousemoverel(mfloor((sp.X - cx) * 0.5), mfloor((sp.Y - cy) * 0.5))
+            else
+                mousemoverel(0, -260)   -- фрукт за кадром: задираем взгляд вверх
+            end
+            task_wait(0.012)
+        end
+    end)
+
+    -- клик в центр (в 1-м лице курсор и есть прицел)
+    pcall_(function()
+        LSM.lastBot = tick_()
         local vps = camera.ViewportSize
         mousemoveabs(mfloor(vps.X / 2), mfloor(vps.Y / 2))
         mouse1click()
@@ -2136,7 +2159,7 @@ _wrap("lemon-farm", function()
         -- потом лимонка забирает его на ОДИН цикл и возвращает. Никто не голодает.
         if buyBusy and afkNow then
             if not LSM.buyHoldT then LSM.buyHoldT = tick_() end
-            if (tick_() - LSM.buyHoldT) > 8 then LSM.lemonSlot = true end
+            if (tick_() - LSM.buyHoldT) > 5 then LSM.lemonSlot = true end
         else
             LSM.buyHoldT = nil
         end
@@ -2155,6 +2178,7 @@ _wrap("lemon-farm", function()
                 end)
                 -- v13.5: зум возвращён - так было в золотой версии
                 print("[Lemon] AFK -> zoom + farm")
+                pcall_(function() camera = Workspace.CurrentCamera end)   -- v14: камера могла пересоздаться при респавне
                 LSM.zoom(1)
                 -- v13.7: взгляд вверх сразу, пока готовится первое дерево
                 pcall_(function()
