@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.3 — автостенд камера ПРЯМО СВЕРХУ (держит весь спам) ]] --
+-- [[ SELL LEMONS v18.4 — таймер минигейма (живой лейбл) в статусе + не играет на кулдауне ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -279,6 +279,34 @@ MG.list = function()
         end
     end)
     return out
+end
+-- v18.4: кулдаун включённого минигейма из живого мирового лейбла
+-- (Purchases.Minigames.<name>...Gui.Label, формат Ч:ММ:СС). Возвращает секунды
+-- или nil (готов / нет таймера). Читается ВСЕГДА, не только рядом (как лоза).
+MG.timerSec = function()
+    if not myTycoon then return nil end
+    local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
+    local mg = pur and pur:FindFirstChild("Minigames")
+    if not mg then return nil end
+    local rem
+    pcall_(function()
+        for _, c in ipairs_(mg:GetChildren()) do
+            local nm = tostring_(c.Name)
+            if MG.enabled[nm] ~= false then
+                for _, d in ipairs_(c:GetDescendants()) do
+                    if tostring_(d.ClassName) == "TextLabel" then
+                        local t; pcall_(function() t = d.Text end)
+                        local hh, mm, ss = tostring_(t or ""):match("^%s*(%d+):(%d%d):(%d%d)%s*$")
+                        if hh then
+                            local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
+                            if r > 0 then rem = r; return end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return rem
 end
 local function _standPartPos(c)
     local pos
@@ -2502,6 +2530,7 @@ end)
 local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 214, 60)})
 local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 
 local function pollInput()
     if not ScriptActive then return end
@@ -2709,7 +2738,7 @@ local function pollInput()
             CFG.vineNotif = true
             pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
         end
-        statusTx3.Position = Vec2(vx, sy)
+        statusTx3.Position = Vec2(vx, sy); sy = sy + 20
         statusTx3.Visible = true
     elseif CFG.vineT then
         local rem = CFG.vineCd - (tick_() - CFG.vineT)
@@ -2727,10 +2756,30 @@ local function pollInput()
                 pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
             end
         end
-        statusTx3.Position = Vec2(vx, sy)
+        statusTx3.Position = Vec2(vx, sy); sy = sy + 20
         statusTx3.Visible = true
     else
         statusTx3.Visible = false
+    end
+    -- v18.4: таймер минигейма (читаем живой мировой лейбл, как кулдаун лозы)
+    if MG.active then
+        local cd = MG.timerSec()
+        if cd and cd > 0 then
+            statusTx4.Text = sformat("minigame  |  %d:%02d", mfloor(cd / 60), mfloor(cd % 60))
+            statusTx4.Color = C3rgb(222, 210, 170)
+            MG.miniNotif = false
+        else
+            statusTx4.Text = "minigame  |  READY"
+            statusTx4.Color = C3rgb(255, 214, 60)
+            if not MG.miniNotif then
+                MG.miniNotif = true
+                pcall_(function() notify("Minigame is READY", "Sell Lemons", 4) end)
+            end
+        end
+        statusTx4.Position = Vec2(vx, sy)
+        statusTx4.Visible = true
+    else
+        statusTx4.Visible = false
     end
 end
 
@@ -2982,8 +3031,14 @@ _wrap("auto-minigame", function()
                     task_wait(0.4)
                     return
                 end
-                -- 3) на скамейке: клик по кнопке PLAY (если есть позиция) + спам E,
-                --    при необходимости ТП к скамейке включённого минигейма.
+                -- 3) КУЛДАУН? не заходим, ждём (таймер тикает в статусе)
+                local cd = MG.timerSec()
+                if cd and cd > 0 then
+                    task_wait(0.5)
+                    return
+                end
+                -- на скамейке: клик по кнопке PLAY (если есть позиция) + спам E,
+                -- при необходимости ТП к скамейке включённого минигейма.
                 LSM.standBusyT = tick_()
                 local play = MG.findBtn("PLAY", true)
                 if play then MG.click(play) end
