@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v16 — фикс пинг-понга Buy+Lemon (по прогрессу) | микро-кэш скана (меньше лага) ]] --
+-- [[ SELL LEMONS v16.1 — стенд ТП в точку E (апгрейд-промпт), а не в центр площадки ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -253,8 +253,8 @@ local function toggleFeature(slot)
     print("[Hub] toggle slot " .. slot)
 end
 
--- v15: выбор стендов для авто-апгрейда. Позиции читаются из myTycoon.Locations
--- В РАНТАЙМЕ - у каждого игрока свой тайкун в своём месте, корды разные.
+-- v15/v16: выбор стендов для авто-апгрейда. Позиции читаются из СВОЕГО тайкуна
+-- В РАНТАЙМЕ (у каждого игрока свой тайкун, корды разные).
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local function _standPartPos(c)
@@ -269,17 +269,45 @@ local function _standPartPos(c)
     if not pos then pcall_(function() if c.PrimaryPart then pos = c.PrimaryPart.Position end end) end
     return pos
 end
+-- v16.1: ТП в точку, ГДЕ ЖМЁШЬ E (главный апгрейд-промпт), а не в центр площадки
+-- из Locations (тот был в ~28 студах от стенда -> ''тепало далеко''). Промпт
+-- лежит в Purchases.<name>.<name>.<name> (тройное имя) или в любом ProximityPrompt
+-- ''Prompt'' внутри папки стенда.
+local function _standUpgradePos(folder, nm)
+    local pos
+    pcall_(function()
+        local n2 = folder:FindFirstChild(nm)
+        local n3 = n2 and n2:FindFirstChild(nm)
+        if n3 then pos = _standPartPos(n3) end
+    end)
+    if not pos then
+        pcall_(function()
+            for _, d in ipairs_(folder:GetDescendants()) do
+                if tostring_(d.ClassName) == "ProximityPrompt" and tostring_(d.Name) == "Prompt" and d.Parent then
+                    pos = _standPartPos(d.Parent); break
+                end
+            end
+        end)
+    end
+    return pos
+end
 local function getStandLocations()
     local out = {}
     if not myTycoon then return out end
-    local loc
+    local pur, loc
+    pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
     pcall_(function() loc = myTycoon:FindFirstChild("Locations") end)
-    if not loc then return out end
-    for _, c in ipairs_(loc:GetChildren()) do
-        local nm = tostring_(c.Name)
+    if not pur then return out end
+    for _, folder in ipairs_(pur:GetChildren()) do
+        local nm = tostring_(folder.Name)
         local low = nm:lower()
         if low:find("lemon") and not low:find("lemonx") then
-            local pos = _standPartPos(c)
+            -- 1) точка апгрейда (где E); 2) запасной вариант - Locations
+            local pos = _standUpgradePos(folder, nm)
+            if not pos and loc then
+                local lc = loc:FindFirstChild(nm)
+                if lc then pos = _standPartPos(lc) end
+            end
             if pos then tinsert(out, {name = nm, pos = pos}) end
         end
     end
