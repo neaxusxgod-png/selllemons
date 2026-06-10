@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.1 — без падений в турбо | фикс двойного таймера | ТП-точки 7/8 (относительно тайкуна) ]] --
+-- [[ SELL LEMONS v12.2 — ТУРБО откачен (ломал покупки), автобай = чистая v5.21 ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1573,11 +1573,6 @@ local function runStandPass(firstRun)
     return "done"
 end
 
--- v12 ТУРБО-покупка: firetouchinterest шлёт серверу событие касания сразу,
--- без ожидания физики. Автодетект: nil = пробуем, true = работает (летим),
--- false = в этой Матче нет эффекта (3 чистых провала) -> классика навсегда.
-local TURBO = { mode = nil, fails = 0 }
-
 -- ==================== AUTO BUY (ORIGINAL v5.17 - worker + coordinator) ====================
 -- Restaurado tal cual el codigo que SI funcionaba. TP a la posicion del boton.
 _wrap("autobuy-worker", function()
@@ -1672,63 +1667,24 @@ _wrap("autobuy-worker", function()
         local pos = btn.Position
         local px, py, pz = pos.X, pos.Y, pos.Z
 
+        -- v12.2: ТУРБО (firetouchinterest) ОТКАЧЕН ПОЛНОСТЬЮ - в этой игре он
+        -- ломал покупки (пропуск кнопок). Ниже классика v5.21 один-в-один,
+        -- та самая, что работала идеально. БОЛЬШЕ НЕ ТРОГАТЬ.
+        pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
+        task_wait(0.02)
+
         local bought = false
-        local turboBought = false
-
-        -- v12: ТУРБО-попытка (ТП к кнопке всё равно нужен - сервер проверяет
-        -- дистанцию, но ждать физического Touched не надо)
-        if TURBO.mode ~= false and type(firetouchinterest) == "function" then
+        local t0 = tick_()
+        while ScriptActive and (tick_() - t0) < CFG.buyWindow do
             pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-            task_wait()
+            task_wait(0.03)
+            local gone = true
             pcall_(function()
-                firetouchinterest(btn, hrp, 0)
-                firetouchinterest(btn, hrp, 1)
+                gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
             end)
-            local tt = tick_()
-            while ScriptActive and (tick_() - tt) < 0.25 do
-                pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)   -- v12.1: держим позицию, не падаем
-                task_wait(0.03)
-                local gone = true
-                pcall_(function()
-                    gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
-                end)
-                if gone then bought = true; turboBought = true; break end
-            end
-            if turboBought and TURBO.mode == nil then
-                TURBO.mode = true
-                print("[Worker] TURBO ON: firetouchinterest works")
-            end
-        end
-
-        if not bought then
-            -- классика v5.21 (проверенная): посадка + окно подтверждения с
-            -- перестановкой HRP (иногда одного касания мало)
-            pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
-            task_wait(0.02)
-            local classicStart = tick_()
-            local t0 = tick_()
-            while ScriptActive and (tick_() - t0) < CFG.buyWindow do
-                pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-                task_wait(0.03)
-                local gone = true
-                pcall_(function()
-                    gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
-                end)
-                if gone then bought = true; break end
-                -- кнопка посерела на середине (кончились деньги) - не упорствуем
-                if isGreyedOut(btn) then break end
-            end
-            -- детект: классика добила то, что турбо не смог = чистый провал турбо
-            -- если классика подтвердила почти мгновенно - это сработал ТУРБО-тач
-            -- (просто сервер ответил позже окна), провалом турбо НЕ считаем
-            if bought and TURBO.mode == nil and type(firetouchinterest) == "function"
-               and (tick_() - classicStart) >= 0.15 then
-                TURBO.fails = TURBO.fails + 1
-                if TURBO.fails >= 3 then
-                    TURBO.mode = false
-                    print("[Worker] turbo off: firetouchinterest has no effect here")
-                end
-            end
+            if gone then bought = true; break end
+            -- кнопка посерела на середине (кончились деньги) - не упорствуем
+            if isGreyedOut(btn) then break end
         end
 
         if bought then
