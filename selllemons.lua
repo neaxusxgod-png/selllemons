@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.1 — Auto Minigame фикс: PICK в PickGui, CHEER в MinigameRace - ищем по всему PlayerGui ]] --
+-- [[ SELL LEMONS v18.2 — PICK клик по экранным долям | селектор минигеймов | окно больше ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -265,7 +265,21 @@ end
 -- В РАНТАЙМЕ (у каждого игрока свой тайкун, корды разные).
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
-local MG = { active = false }   -- v17: Auto Minigame (все хелперы и флаг в таблице = 1 регистр)
+local MG = { active = false, enabled = {} }   -- v17: Auto Minigame (всё в таблице = 1 регистр)
+-- v18.2: список минигеймов = папки в Purchases.Minigames (для чекбоксов-селектора)
+MG.list = function()
+    local out = {}
+    if not myTycoon then return out end
+    local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
+    local mg = pur and pur:FindFirstChild("Minigames")
+    if not mg then return out end
+    pcall_(function()
+        for _, c in ipairs_(mg:GetChildren()) do
+            if c:IsA("Folder") or c:IsA("Model") then out[#out + 1] = tostring_(c.Name) end
+        end
+    end)
+    return out
+end
 local function _standPartPos(c)
     local pos
     pcall_(function() pos = c.Position end)
@@ -338,7 +352,7 @@ end
 -- ---- Окно ----
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
-    local window = homesick.createWindow("Sell Lemons", 420, 360)
+    local window = homesick.createWindow("Sell Lemons", 480, 420)
     pcall_(function() window:autoloadConfig("selllemons_config") end)
     pcall_(function() window:autoloadTheme("theme") end)
     UIRef.win = window
@@ -402,12 +416,11 @@ if homesick then
         end)
     end)
 
-    -- v15: вкладка выбора стендов (чекбокс на каждый). Состояние сохраняется
-    -- автоконфигом homesick. Имена берём из живого тайкуна, иначе фоллбэк-список.
+    -- v18.2: вкладка "Auto" - выбор стендов И минигеймов (чекбоксы). Состояние
+    -- сохраняется автоконфигом homesick. Имена из живого тайкуна.
     pcall_(function()
-        local standTab = window:addTab("Stands")
-        -- v17.1: одна секция (раньше было две "Auto Upgrade" - выглядело дублем)
-        local sec = standTab:addSection("Auto Upgrade", "Left")
+        local autoTab = window:addTab("Auto")
+        local sec = autoTab:addSection("Stands", "Left")
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
         if #listed == 0 then listed = STAND_NAMES end
@@ -416,6 +429,17 @@ if homesick then
             sec:addCheckbox("stand_" .. nm, nm, true, function(val)
                 standEnabled[nm] = val
             end)
+        end
+        -- минигеймы: чекбокс на каждый (Auto Minigame играет только включённые)
+        local mgList = MG.list()
+        if #mgList > 0 then
+            local mgSec = autoTab:addSection("Minigames", "Right")
+            for _, nm in ipairs_(mgList) do
+                if MG.enabled[nm] == nil then MG.enabled[nm] = true end
+                mgSec:addCheckbox("mini_" .. nm, nm, true, function(val)
+                    MG.enabled[nm] = val
+                end)
+            end
         end
     end)
 
@@ -2894,6 +2918,8 @@ function MG.click(btn)
         if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
     end)
 end
+-- v18.2: позиция входа = промпт ТОЛЬКО включённого минигейма (селектор), чтобы
+-- не лезть во "вторую игру", которую отключили.
 function MG.entryPos()
     if not myTycoon then return nil end
     local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
@@ -2901,13 +2927,36 @@ function MG.entryPos()
     if not mg then return nil end
     local pos
     pcall_(function()
-        for _, d in ipairs_(mg:GetDescendants()) do
-            if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
-                pos = _standPartPos(d.Parent); break
+        for _, c in ipairs_(mg:GetChildren()) do
+            local nm = tostring_(c.Name)
+            if MG.enabled[nm] ~= false then   -- только включённые минигеймы
+                for _, d in ipairs_(c:GetDescendants()) do
+                    if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
+                        pos = _standPartPos(d.Parent); return
+                    end
+                end
             end
         end
     end)
     return pos
+end
+-- v18.2: PICK-кнопки = BillboardGui под мячами, у них AbsolutePosition 0,0 ->
+-- кликаем по 4 экранным позициям внизу (где они отрисованы). Любой PICK годится.
+function MG.clickSlots()
+    local vw, vh = 1920, 1080
+    pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
+    local ox, oy = S.mx, S.my
+    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+    for _, fx in ipairs_({0.14, 0.35, 0.56, 0.78}) do
+        if not MG.active then break end
+        LSM.lastBot = tick_()
+        pcall_(function()
+            mousemoveabs(mfloor(vw * fx), mfloor(vh * 0.84))
+            mouse1press(); mouse1release()
+        end)
+        task_wait(0.06)
+    end
+    pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
 _wrap("auto-minigame", function()
     while ScriptActive do
@@ -2924,16 +2973,16 @@ _wrap("auto-minigame", function()
                     end
                     return
                 end
-                -- 2) ВЫБОР: любой PICK с реальной позицией
-                local pick = MG.findBtn("PICK", true)
-                if pick then
+                -- 2) ВЫБОР: есть PICK-экран? (ищем даже кнопки с поз 0,0)
+                if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
-                    MG.click(pick)
-                    task_wait(0.35)
+                    local pp = MG.findBtn("PICK", true)
+                    if pp then MG.click(pp) else MG.clickSlots() end   -- 0,0 -> по экранным долям
+                    task_wait(0.4)
                     return
                 end
                 -- 3) на скамейке: клик по кнопке PLAY (если есть позиция) + спам E,
-                --    при необходимости ТП к скамейке. Без AFK-гейта.
+                --    при необходимости ТП к скамейке включённого минигейма.
                 LSM.standBusyT = tick_()
                 local play = MG.findBtn("PLAY", true)
                 if play then MG.click(play) end
