@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v17.1 — минигейм без AFK-гейта (жмёт E сразу) | Stands одна секция ]] --
+-- [[ SELL LEMONS v17.2 — стеклянное меню (прозрачные фоны, чёткий текст) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -213,6 +213,14 @@ do
         src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(168, 154, 112),')
         src = src:gsub('%(ProjectState%.badgeText %.%. " | v1%.4%.0"%)', '(ProjectState.badgeText)')
         src = src:gsub('or "v1%.4%.0"', 'or ""')
+        -- v17.2: СТЕКЛЯННАЯ прозрачность. Drawing.Transparency = непрозрачность
+        -- (1=плотно). Понижаем альфу ТОЛЬКО фонов в ThemeAlpha - текст/акцент/
+        -- рамка остаются 1.0 (чёткие, читаемые). Получается стекло.
+        src = src:gsub('bg = 1%.0,', 'bg = 0.68,')
+        src = src:gsub('surface = 1%.0,', 'surface = 0.70,')
+        src = src:gsub('surface2 = 1%.0,', 'surface2 = 0.78,')
+        src = src:gsub('surface3 = 1%.0,', 'surface3 = 0.82,')
+        src = src:gsub('border = 1%.0,', 'border = 0.9,')
         loadstring(src)()
     end)
     homesick = _G.homesick
