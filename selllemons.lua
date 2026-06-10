@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.8 — Auto Deal v3: точный путь PlayerGui.Phone, верхняя кнопка с любым текстом ]] --
+-- [[ SELL LEMONS v13.9 — мгновенный старт лимонки при включении | тайм-слоты с автобаем (8с/цикл) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -243,7 +243,9 @@ end
 local function toggleFeature(slot)
     if not UX.fire("slot" .. slot) then return end
     if     slot == 1 then autoBuyActive   = not autoBuyActive
-    elseif slot == 2 then lemonFarmActive = not lemonFarmActive
+    elseif slot == 2 then
+        lemonFarmActive = not lemonFarmActive
+        if lemonFarmActive then S.lastUser = tick_() - CFG.afkDelay - 1 end
     elseif slot == 3 then autoStandActive = not autoStandActive
     elseif slot == 4 then cashFarmActive  = not cashFarmActive
     elseif slot == 5 then stopAll(); return
@@ -270,6 +272,7 @@ if homesick then
 
     UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
         lemonFarmActive = val
+        if val then S.lastUser = tick_() - CFG.afkDelay - 1 end   -- v13.9: включил = фарми сразу
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
@@ -1615,7 +1618,7 @@ _wrap("autobuy-worker", function()
             task_wait(0.05)
             continue
         end
-        if _standIsTapping then
+        if _standIsTapping or LSM.lemonSlot == true then
             task_wait(0.05)
             continue
         end
@@ -1744,7 +1747,7 @@ _wrap("autobuy-coord", function()
             task_wait(0.2)
             continue
         end
-        if _standIsTapping then
+        if _standIsTapping or LSM.lemonSlot == true then
             task_wait(0.2)
             continue
         end
@@ -2077,7 +2080,7 @@ local function processSnapshot(snapshot, hrp)
     for _, tree in ipairs_(groupOrder) do
         if not lemonFarmActive then break end
         if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end   -- игрок вернулся -> мгновенно отпускаем
-        if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then break end   -- уступаем автобаю
+        if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end   -- уступаем автобаю
         if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then break end   -- уступаем стенду
         local fruits = groups[tree]
         local excludeSet = {}
@@ -2093,7 +2096,7 @@ local function processSnapshot(snapshot, hrp)
         for i = 1, #fruits do
             if not lemonFarmActive then break end
             if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
-            if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then break end
+            if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
             if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then break end
             local v = fruits[i]
             if v and v:IsDescendantOf(Workspace) then
@@ -2129,6 +2132,15 @@ _wrap("lemon-farm", function()
             print(buyBusy and "[Lemon] pause: autobuy buying" or "[Lemon] autobuy done -> resume")
         end
         local afkNow = (tick_() - (S.lastUser or 0)) >= CFG.afkDelay
+        -- v13.9: тайм-слоты. Автобай держит персонажа максимум 8с подряд;
+        -- потом лимонка забирает его на ОДИН цикл и возвращает. Никто не голодает.
+        if buyBusy and afkNow then
+            if not LSM.buyHoldT then LSM.buyHoldT = tick_() end
+            if (tick_() - LSM.buyHoldT) > 8 then LSM.lemonSlot = true end
+        else
+            LSM.buyHoldT = nil
+        end
+        if not (lemonFarmActive and autoBuyActive) then LSM.lemonSlot = false end
         if lemonFarmActive and LSM.annAfk ~= afkNow then
             LSM.annAfk = afkNow
             if afkNow then
@@ -2162,7 +2174,7 @@ _wrap("lemon-farm", function()
             LSM.returnHome()   -- лимонку выключили посреди фарма: домой + зум
         end
         local standBusy = autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4
-        if lemonFarmActive and hrp and not buyBusy and not standBusy and afkNow then
+        if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow then
             lemonFailCount = {}
 
             local pass            = 0
@@ -2216,6 +2228,11 @@ _wrap("lemon-farm", function()
                 end
             end
 
+            -- v13.9: слот истрачен - отдаём персонажа автобаю
+            if LSM.lemonSlot then
+                LSM.lemonSlot = false
+                LSM.buyHoldT = nil
+            end
             task_wait(0.1)
         else
             task_wait(0.05)
