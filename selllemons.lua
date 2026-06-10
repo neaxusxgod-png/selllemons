@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.4 — лимонная тема меню | красивые тексты | свой футер без версии ]] --
+-- [[ SELL LEMONS v12.5 — таймер-цикл убит (botPhase) | лимонка всегда классика | Cash Vine TP + 4ч таймер ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -174,11 +174,19 @@ local CFG = {
     zoomTicks = 16,     -- щелчков скролла в первое лицо (было 10 - не хватало)
     zoomStep  = 1,      -- если зум не в ту сторону - поставить -1
     standRest = 60,     -- АвтоСтенд проходится раз в минуту, когда лимонка включена
+    vineCd    = 4 * 3600,   -- кулдаун Cash Vine (4 часа)
 }
 
 local S = {
     lastUser = tick_(), pmx = 0, pmy = 0, keyDown = {}, lastFire = {},
 }
+-- v12.5: таймер Cash Vine переживает перезапуски (tick() = unix-время)
+pcall_(function()
+    if type(readfile) == "function" then
+        local v = tonumber(readfile("selllemons_vine.txt"))
+        if v then CFG.vineT = v end
+    end
+end)
 local UX = {}
 function UX.fire(id)
     local now = tick_()
@@ -291,6 +299,15 @@ if homesick then
     end)
 
     pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
+    UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
+        if val then
+            CFG.vineGo = true   -- сам ТП делает input-цикл (там вся область видимости)
+            task.delay(0.1, function()
+                pcall_(function() UIRef.t.CashVine:SetValue(false) end)
+            end)
+        end
+    end)
+
     window.visible = true
     window:render()
     print("[Hub] homesick UI loaded - keys 1-5 via keybinds")
@@ -536,7 +553,7 @@ local lastCashCount   = 0
 -- (v6.0) Хоткеи 1-5 и Insert теперь в INPUT-блоке внизу файла.
 
 -- v7.4: режим сбора лимонов (автоопределяется на первых фруктах, см. ниже)
-local LSM = { mode = nil, annAfk = false, annBuy = false }   -- nil=детект | "cd" | "sig" | "touch" | "classic"; ann-флаги СРАЗУ false (nil давал ложный переход)
+local LSM = { mode = "classic", annAfk = false, annBuy = false }   -- v12.5: ТОЛЬКО классика (ТП+камера+клик). Автодетект тихих режимов лочился на нерабочем touch/sig -> лимонка переставала смотреть вверх и кликать
 
 local ANTIGRAV_VEL = Vec3(0, 2, 0)
 RunService.RenderStepped:Connect(function()
@@ -1960,18 +1977,6 @@ local function processLemon(v, hrp)
     if not _windowFocused() then return false end
     if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then return false end   -- стенд занят
 
-    -- v7.4: сначала тихие режимы; classic только если ничего не сработало
-    if LSM.mode ~= "classic" then
-        if LSM.silent(v) then return true end
-        if LSM.mode == "cd" or LSM.mode == "sig" then return false end
-        if LSM.touch(v, hrp) then return true end
-        if LSM.mode == "touch" then return false end
-        if LSM.mode == nil then
-            LSM.mode = "classic"
-            print("[Lemon] тихие режимы не сработали -> CLASSIC (ТП+камера+клик)")
-        end
-    end
-
     local origSize, origTransp, origCanColl = nil, nil, nil
     local hitboxApplied = false
     if LEMON_HITBOX_ENABLED then
@@ -2220,6 +2225,7 @@ end)
 -- продолжает фармить в фоне.
 local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 214, 60)})
 local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 
 local function pollInput()
     if not ScriptActive then return end
@@ -2247,13 +2253,18 @@ local function pollInput()
         if mouse then pcall_(function() mx = mouse.X; my = mouse.Y end) end
         local m1 = false
         pcall_(function() m1 = ismouse1pressed() end)
-        -- v12.3: пока автобай реально покупает (и 1с после) - его ТП двигают
-        -- mouse.X/Y сами по себе, поэтому мышь и клик НЕ считаются активностью
-        -- (таймер шёл по кругу). Клавиши WASD/пробел будят фарм всегда.
+        -- v12.5: КОРЕНЬ таймера по кругу: зум/ТП двигают камеру, а от этого
+        -- в Матче дрейфует mouse.X/Y -> скрипт принимал СВОИ действия за игрока
+        -- (фарм -> ''движение'' -> пауза -> зум-аут -> ''движение'' -> таймер...).
+        -- Решение: пока идёт ФАРМ или автобай покупает - мышь и клик вообще
+        -- не считаются активностью. Разбудить фарм: WASD/пробел.
         if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then
             S.busyT = nowA
         end
-        if (nowA - (LSM.lastBot or 0)) > 0.35 and (nowA - (S.busyT or 0)) >= 1.0 then
+        local botPhase = (lemonFarmActive and LSM.annAfk == true)
+            or (nowA - (S.busyT or 0)) < 1.0
+            or (nowA - (LSM.lastBot or 0)) <= 0.35
+        if not botPhase then
             local moved = mabs(mx - S.pmx) + mabs(my - S.pmy)
             if moved > 3 or m1 then S.lastUser = nowA end
         end
@@ -2263,9 +2274,48 @@ local function pollInput()
         end
     end
 
-    -- Статус-строки с делеями (вместо спама тостов): лимонка + стенд
+    -- Cash Vine: запрос ТП из меню (CFG.vineGo ставит коллбэк тоггла)
+    if CFG.vineGo then
+        CFG.vineGo = false
+        local vp7
+        pcall_(function()
+            local sewer = Workspace:FindFirstChild("Sewer")
+            local folder = sewer and sewer:FindFirstChild("CashVine")
+            if folder then
+                local m = folder:FindFirstChild("CashVine")
+                if m then vp7 = _modelPivotPos(m) end
+                if not vp7 then
+                    local d = folder:FindFirstChild("VineDoor")
+                    if d then vp7 = d.Position end
+                end
+            end
+        end)
+        if vp7 then
+            pcall_(function()
+                local chr = player.Character
+                local h = chr and chr:FindFirstChild("HumanoidRootPart")
+                if h then
+                    h.CFrame = CF(vp7.X, vp7.Y + 3, vp7.Z)
+                    h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+                end
+            end)
+            CFG.vineT = tick_()
+            CFG.vineNotif = false
+            pcall_(function()
+                if type(writefile) == "function" then
+                    writefile("selllemons_vine.txt", tostring_(CFG.vineT))
+                end
+            end)
+            rprint("[Vine] teleported - 4h timer started")
+        else
+            rprint("[Vine] not found (Workspace.Sewer.CashVine)")
+        end
+    end
+
+    -- Статус-строки с делеями: лимонка + стенд + лоза
     local vx = 960
     pcall_(function() vx = camera.ViewportSize.X * 0.5 end)
+    local sy = 8
     if lemonFarmActive then
         local txt
         local qRem = #localQueue - queueIndex + 1
@@ -2278,11 +2328,11 @@ local function pollInput()
             if idleT < CFG.afkDelay then
                 txt = sformat("lemon farm  |  starts in %ds (stop moving)", mfloor(CFG.afkDelay - idleT) + 1)
             else
-                txt = "lemon farm  |  FARMING"
+                txt = "lemon farm  |  FARMING (WASD = stop)"
             end
         end
         statusTx.Text = txt
-        statusTx.Position = Vec2(vx, 8)
+        statusTx.Position = Vec2(vx, sy); sy = sy + 20
         statusTx.Visible = true
     else
         statusTx.Visible = false
@@ -2297,10 +2347,28 @@ local function pollInput()
             txt2 = "auto stand  |  ON"
         end
         statusTx2.Text = txt2
-        statusTx2.Position = Vec2(vx, lemonFarmActive and 28 or 8)
+        statusTx2.Position = Vec2(vx, sy); sy = sy + 20
         statusTx2.Visible = true
     else
         statusTx2.Visible = false
+    end
+    if CFG.vineT then
+        local rem = CFG.vineCd - (tick_() - CFG.vineT)
+        if rem > 0 then
+            statusTx3.Text = sformat("cash vine  |  %dh %02dm", mfloor(rem / 3600), mfloor((rem % 3600) / 60))
+            statusTx3.Color = C3rgb(222, 210, 170)
+        else
+            statusTx3.Text = "cash vine  |  READY"
+            statusTx3.Color = C3rgb(255, 214, 60)
+            if not CFG.vineNotif then
+                CFG.vineNotif = true
+                pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
+            end
+        end
+        statusTx3.Position = Vec2(vx, sy)
+        statusTx3.Visible = true
+    else
+        statusTx3.Visible = false
     end
 end
 
