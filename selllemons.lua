@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.5 — CHEER непрерывный спам | стенд камера сверху держится каждый кадр ]] --
+-- [[ SELL LEMONS v18.6 — PICK клик выше (3 ряда) | минигеймы только с promptом (без Buttons) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -275,7 +275,17 @@ MG.list = function()
     if not mg then return out end
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
-            if c:IsA("Folder") or c:IsA("Model") then out[#out + 1] = tostring_(c.Name) end
+            if c:IsA("Folder") or c:IsA("Model") then
+                -- только ИГРАБЕЛЬНЫЕ: внутри есть ProximityPrompt (скамейка с E).
+                -- Так отсекаем инфраструктуру вроде "Buttons".
+                local ok = false
+                pcall_(function()
+                    for _, d in ipairs_(c:GetDescendants()) do
+                        if tostring_(d.ClassName) == "ProximityPrompt" then ok = true; break end
+                    end
+                end)
+                if ok then out[#out + 1] = tostring_(c.Name) end
+            end
         end
     end)
     return out
@@ -2996,19 +3006,24 @@ function MG.entryPos()
 end
 -- v18.2: PICK-кнопки = BillboardGui под мячами, у них AbsolutePosition 0,0 ->
 -- кликаем по 4 экранным позициям внизу (где они отрисованы). Любой PICK годится.
+-- v18.6: PICK-кнопки = билборды под 4 мячами (поз 0,0). Кликаем по экранным
+-- позициям. Раньше один ряд на 0.84 высоты - оказался НИЖЕ кнопок. Теперь
+-- НЕСКОЛЬКО рядов (0.74/0.78/0.82), один точно попадёт. Любой PICK годится.
 function MG.clickSlots()
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
-    for _, fx in ipairs_({0.14, 0.35, 0.56, 0.78}) do
-        if not MG.active then break end
-        LSM.lastBot = tick_()
-        pcall_(function()
-            mousemoveabs(mfloor(vw * fx), mfloor(vh * 0.84))
-            mouse1press(); mouse1release()
-        end)
-        task_wait(0.06)
+    for _, fy in ipairs_({0.74, 0.78, 0.82}) do
+        for _, fx in ipairs_({0.14, 0.35, 0.56, 0.78}) do
+            if not MG.active then break end
+            LSM.lastBot = tick_()
+            pcall_(function()
+                mousemoveabs(mfloor(vw * fx), mfloor(vh * fy))
+                mouse1press(); mouse1release()
+            end)
+            task_wait(0.03)
+        end
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
@@ -3052,11 +3067,11 @@ _wrap("auto-minigame", function()
                     MG.spamCheer(cheer)        -- v18.5: НЕПРЕРЫВНЫЙ супербыстрый спам
                     return
                 end
-                -- 2) ВЫБОР: есть PICK-экран? (ищем даже кнопки с поз 0,0)
+                -- 2) ВЫБОР: есть PICK-экран? PICK = билборды (поз ненадёжна) ->
+                -- ВСЕГДА кликаем по экранным долям несколькими рядами.
                 if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
-                    local pp = MG.findBtn("PICK", true)
-                    if pp then MG.click(pp) else MG.clickSlots() end   -- 0,0 -> по экранным долям
+                    MG.clickSlots()
                     task_wait(0.4)
                     return
                 end
