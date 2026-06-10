@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v16.2 — стенд ТП перед стендом (промпт + сдвиг к площадке), не криво/не внутрь ]] --
+-- [[ SELL LEMONS v17 — Auto Minigame (PLAY E -> PICK -> спам CHEER) + стенд ТП перед стендом ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -257,6 +257,7 @@ end
 -- В РАНТАЙМЕ (у каждого игрока свой тайкун, корды разные).
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
+local MG = { active = false }   -- v17: Auto Minigame (все хелперы и флаг в таблице = 1 регистр)
 local function _standPartPos(c)
     local pos
     pcall_(function() pos = c.Position end)
@@ -362,6 +363,11 @@ if homesick then
     pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
+    end)
+
+    UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
+        MG.active = val
+        print("[Hub] toggle AutoMinigame = " .. tostring_(val))
     end)
 
     UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
@@ -2791,6 +2797,123 @@ _wrap("auto-deal", function()
             end)
         end
         task_wait(0.5)
+    end
+end)
+
+-- ==================== AUTO MINIGAME (v17) ====================
+-- Скамейка PLAY (E) -> экран "WHO WILL WIN?" жмём любой PICK -> гонка: спамим
+-- CHEER до победы. Кнопки ищем по тексту в PlayerGui.MinigameRace.
+function MG.root()
+    local pg = player:FindFirstChildOfClass("PlayerGui")
+    return pg and pg:FindFirstChild("MinigameRace")
+end
+function MG.text(d)
+    local t; pcall_(function() t = d.Text end)
+    if not t or t == "" then
+        pcall_(function()
+            for _, c in ipairs_(d:GetDescendants()) do
+                if tostring_(c.ClassName) == "TextLabel" then t = c.Text; return end
+            end
+        end)
+    end
+    return tostring_(t or ""):upper()
+end
+function MG.shown(o)
+    local cur = o
+    for _ = 1, 20 do
+        if not cur then return true end
+        local cn = tostring_(cur.ClassName)
+        if cn == "ScreenGui" then local en; pcall_(function() en = cur.Enabled end); return en ~= false end
+        if cn == "PlayerGui" then return true end
+        local vis; pcall_(function() vis = cur.Visible end)
+        if vis == false then return false end
+        cur = cur.Parent
+    end
+    return true
+end
+function MG.find(root, want)
+    local hit
+    pcall_(function()
+        for _, d in ipairs_(root:GetDescendants()) do
+            local cn = tostring_(d.ClassName)
+            if (cn == "TextButton" or cn == "ImageButton") and MG.shown(d) then
+                if MG.text(d):find(want) then hit = d; return end
+            end
+        end
+    end)
+    return hit
+end
+function MG.click(btn)
+    local ap, az
+    pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
+    if not ap or not az then return end
+    local inset = 0
+    pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+    local ox, oy = S.mx, S.my
+    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+    LSM.lastBot = tick_()
+    pcall_(function()
+        mousemoveabs(mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2 + inset))
+        mouse1press(); mouse1release()
+        if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
+    end)
+end
+function MG.entryPos()
+    if not myTycoon then return nil end
+    local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
+    local mg = pur and pur:FindFirstChild("Minigames")
+    if not mg then return nil end
+    local pos
+    pcall_(function()
+        for _, d in ipairs_(mg:GetDescendants()) do
+            if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
+                pos = _standPartPos(d.Parent); break
+            end
+        end
+    end)
+    return pos
+end
+_wrap("auto-minigame", function()
+    while ScriptActive do
+        if MG.active then
+            pcall_(function()
+                local root = MG.root()
+                if root and MG.shown(root) then
+                    LSM.standBusyT = tick_()   -- идёт минигейм -> лимонка/стенд не лезут
+                    -- 1) гонка: CHEER -> спамим
+                    local cheer = MG.find(root, "CHEER")
+                    if cheer then
+                        for _ = 1, 10 do
+                            if not MG.active then break end
+                            MG.click(cheer)
+                            task_wait(0.04)
+                        end
+                        return
+                    end
+                    -- 2) выбор: PICK -> жмём любой
+                    local pick = MG.find(root, "PICK")
+                    if pick then
+                        MG.click(pick)
+                        task_wait(0.5)
+                        return
+                    end
+                    return   -- экран итогов/Exit - ждём
+                end
+                -- не в минигейме: ТП к скамейке + E (только когда AFK, чтоб не дёргать)
+                if (tick_() - (S.lastUser or 0)) >= CFG.afkDelay then
+                    local pos = MG.entryPos()
+                    if pos and _tpHrpTo(pos) then
+                        LSM.standBusyT = tick_()
+                        for _ = 1, 8 do
+                            if not MG.active then break end
+                            keypress(0x45); task_wait(0.03); keyrelease(0x45); task_wait(0.03)
+                        end
+                        task_wait(0.5)
+                    end
+                end
+            end)
+        end
+        task_wait(0.2)
     end
 end)
 
