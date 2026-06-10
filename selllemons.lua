@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.3 — Cash Farm включён по умолчанию ]] --
+-- [[ SELL LEMONS v13.4 — Control: тогглы сверху, разделитель, Stop All внизу ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -310,6 +310,22 @@ if homesick then
         else
             CFG.vineBack = true  -- ВЫКЛ: вернуться, где был
         end
+    end)
+
+    pcall_(function() right:addSeparator() end)
+
+    UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
+        if val then
+            stopAll()
+            task.delay(0.1, function()
+                pcall_(function() UIRef.t.StopAll:SetValue(false) end)
+            end)
+        end
+    end):addKeybind("5", "Toggle", true, function()
+        stopAll()
+        task.delay(0.1, function()
+            pcall_(function() UIRef.t.StopAll:SetValue(false) end)
+        end)
     end)
 
     window.visible = true
