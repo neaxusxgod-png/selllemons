@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.14 — стенд ОТДАЛЯЕТ камеру + смотрит вниз | лемон возврат в 1-е лицо ]] --
+-- [[ SELL LEMONS v18.15 — БОЛЬШАЯ ОПТИМИЗАЦИЯ (лаги меню) | минигейм CHEER/EXIT фикс | плавный зум после стендов ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -87,11 +87,20 @@ local buyBlacklist    = {}
 local failedButtons   = {}
 local buyAttempt      = {}   -- v5.19: [key] = {tries=, next=} backoff (reemplaza blacklist permanente)
 
+-- v18.15: ключ кэшируется по инстансу (кнопки статичны). Раньше каждый проход
+-- очереди/скана читал Position и собирал строку заново - тысячи бридж-чтений
+-- в секунду, на слабых ПК от этого лагало ВСЁ меню при автобае.
+local keyMemo = {}
+pcall_(function() setmetatable(keyMemo, { __mode = "k" }) end)
 local function getButtonKey(v)
     if not v then return nil end
+    local k = keyMemo[v]
+    if k then return k end
     local pos = v.Position
     if not pos then return nil end
-    return sformat("%d,%d,%d", mfloor(pos.X + 0.5), mfloor(pos.Y + 0.5), mfloor(pos.Z + 0.5))
+    k = sformat("%d,%d,%d", mfloor(pos.X + 0.5), mfloor(pos.Y + 0.5), mfloor(pos.Z + 0.5))
+    keyMemo[v] = k
+    return k
 end
 
 local function resetBuyBlacklist()
@@ -155,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.14 ===")
+print("=== SELL LEMONS v18.15 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -316,6 +325,13 @@ end
 -- (Purchases.Minigames.<name>...Gui.Label, формат Ч:ММ:СС). Возвращает секунды
 -- или nil (готов / нет таймера). Читается ВСЕГДА, не только рядом (как лоза).
 MG.timerSec = function()
+    -- v18.15: кэш 1с. Эту функцию зовут статус-строка (была КАЖДЫЙ КАДР) и цикл
+    -- минигейма - а внутри полный GetDescendants по моделям минигеймов (тысячи
+    -- частей). Именно это клало FPS у людей при включённом Auto Minigame.
+    local now = tick_()
+    if MG.tsT and (now - MG.tsT) < 1.0 then return MG.tsVal end
+    MG.tsT = now
+    MG.tsVal = nil
     if not myTycoon then return nil end
     local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
     local mg = pur and pur:FindFirstChild("Minigames")
@@ -338,6 +354,7 @@ MG.timerSec = function()
             end
         end
     end)
+    MG.tsVal = rem
     return rem
 end
 local function _standPartPos(c)
@@ -875,21 +892,34 @@ local function appendNewButtons()
     return added
 end
 
+-- v18.15: результат живёт 0.15с (поля в _bScan). Эти проверки зовутся воркером,
+-- координатором и автостендом по многу раз в сек, каждая - полный проход по
+-- кнопкам с pcall-чтением цвета. Свежесть 0.15с лишь задерживает РЕШЕНИЕ
+-- (резет/уступить ход) на доли секунды - сам процесс покупки не трогает.
 local function allButtonsDead()
+    local now = tick_()
+    if _bScan.deadT and (now - _bScan.deadT) < 0.15 then return _bScan.dead end
+    local dead = true
     local buttons = getButtonsRealTime()
-    if #buttons == 0 then return false end
-    for _, v in ipairs_(buttons) do
-        local key = getButtonKey(v)
-        if key then
-            local a = buyAttempt[key]
-            if a and a.inst and a.inst ~= v then buyAttempt[key] = nil; a = nil end
-            local givenUp = a and a.n >= 6
-            if not isBlacklisted(key, v) and not isGreyedOut(v) and not givenUp then
-                return false
+    if #buttons == 0 then
+        dead = false
+    else
+        for _, v in ipairs_(buttons) do
+            local key = getButtonKey(v)
+            if key then
+                local a = buyAttempt[key]
+                if a and a.inst and a.inst ~= v then buyAttempt[key] = nil; a = nil end
+                local givenUp = a and a.n >= 6
+                if not isBlacklisted(key, v) and not isGreyedOut(v) and not givenUp then
+                    dead = false
+                    break
+                end
             end
         end
     end
-    return true
+    _bScan.deadT = now
+    _bScan.dead = dead
+    return dead
 end
 
 -- v7.0: ''все мертвы'' бывает по двум причинам: (а) все кнопки СЕРЫЕ -> просто
@@ -897,6 +927,9 @@ end
 -- (б) есть given-up кнопки (6 реальных провалов) -> вот им резет даёт второй
 -- шанс. Резетим только в случае (б) — убирает спам ''ALL DEAD! Reset'' каждые 2с.
 local function anyGivenUpButtons()
+    local now = tick_()
+    if _bScan.giveT and (now - _bScan.giveT) < 0.15 then return _bScan.give end
+    local found = false
     local buttons = getButtonsRealTime()
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
@@ -905,11 +938,14 @@ local function anyGivenUpButtons()
             if a and a.inst and a.inst ~= v then
                 buyAttempt[key] = nil
             elseif a and a.n >= 6 and not isBlacklisted(key, v) then
-                return true
+                found = true
+                break
             end
         end
     end
-    return false
+    _bScan.giveT = now
+    _bScan.give = found
+    return found
 end
 
 local function cleanupQueue()
@@ -934,153 +970,9 @@ end
 
 -- ==================== AUTO STAND (TP a Purchases/* y spam E) ====================
 local STAND_KEY            = 0x45             -- Windows VK_E.
-local STAND_PRESSES        = 1
-local STAND_TP_SETTLE      = 0.05
 local STAND_CYCLE_PAUSE    = 0.02
 local STAND_TP_Y_OFFSET    = 3
-local STAND_RECHECK_EVERY  = 1
-local STAND_FOLDER_PREFIX  = "Lemon"
 local STAND_LOOP_DELAY     = 0.1
-
-local standCache = {}
-local STAND_CACHE_TTL = 5.0
-local STAND_USE_PRICE_GATE = true
-local STAND_REQUIRE_PRICE  = false  -- v7.4: цена не нашлась -> всё равно ТП+E (чинит Lemon stand)
-local STAND_PRICE_PATH     = {"Upgrade", "Price"}
-local TIER_DIAGNOSTICS      = true
-local TIER_REMOTE_FIRST     = true
-local TIER_GUI_SIGNAL       = true
-local TIER_PROXIMITY        = true
-local TIER_FALLBACK_TP      = true
-
-local tierStats = { remote = 0, gui = 0, proximity = 0, tp = 0, fail = 0 }
-
-
-local function _modelPivotPos(model)
-    if not model then return nil end
-    local pp = model.PrimaryPart
-    if pp then
-        local ok2, p = pcall_(function() return pp.Position end)
-        if p then return p end
-    end
-    local ok, piv = pcall_(function() return model:GetPivot() end)
-    if piv then
-        local ok2, p = pcall_(function() return piv.Position end)
-        if p then return p end
-    end
-    local ok, desc = pcall_(function() return model:GetDescendants() end)
-    if desc then
-        for _, d in ipairs_(desc) do
-            local isBase = d:IsA("BasePart")
-            if isBase then
-                local ok3, p = pcall_(function() return d.Position end)
-                if p then return p end
-            end
-        end
-    end
-    local ok, cf = pcall_(function() return model:GetBoundingBox() end)
-    if cf then
-        local ok2, p = pcall_(function() return cf.Position end)
-        if p then return p end
-    end
-    return nil
-end
-
-local function _isPlaceholderModel(model)
-    if not model then return true end
-    local ok, kids = pcall_(function() return model:GetChildren() end)
-    if not ok or not kids or #kids == 0 then return true end
-    if #kids > 1 then return false end
-    local c = kids[1]
-    local isBase = c:IsA("BasePart")
-    if isBase then
-        local sameName = c.Name == model.Name
-        if sameName then return true end
-        return false
-    end
-    local isMdl = c:IsA("Model")
-    if isMdl then return _isPlaceholderModel(c) end
-    return true
-end
-
-local function _findStandModel(folder)
-    local ok, kids = pcall_(function() return folder:GetChildren() end)
-    if kids then
-        for _, c in ipairs_(kids) do
-            local isModel = c:IsA("Model")
-            if isModel and c.Name == folder.Name then
-                if not _isPlaceholderModel(c) then return c end
-            end
-        end
-        for _, c in ipairs_(kids) do
-            local isModel = c:IsA("Model")
-            if isModel and not _isPlaceholderModel(c) then return c end
-        end
-    end
-    local ok, desc = pcall_(function() return folder:GetDescendants() end)
-    if desc then
-        for _, d in ipairs_(desc) do
-            local isModel = d:IsA("Model")
-            if isModel then
-                local pp = d.PrimaryPart
-                if pp and not _isPlaceholderModel(d) then return d end
-            end
-        end
-    end
-    return nil
-end
-
-local function getStandTargets(verbose)
-    local out = {}
-    if not myTycoon then
-        if verbose then print("[Stand] myTycoon nil") end
-        return out
-    end
-    local purchases
-    pcall_(function() purchases = myTycoon:FindFirstChild("Purchases") end)
-    if not purchases then
-        if verbose then print("[Stand] Purchases folder no encontrado en " .. tostring(myTycoon:GetFullName())) end
-        return out
-    end
-    local kids; pcall_(function() kids = purchases:GetChildren() end)
-    if not kids then return out end
-    local prefix = (STAND_FOLDER_PREFIX or ""):lower()
-    local skipped, noModel, noPos = 0, 0, 0
-    local now = tick_()
-    for _, folder in ipairs_(kids) do
-        local nm = tostring(folder.Name)
-        if prefix ~= "" and nm:lower():sub(1, #prefix) ~= prefix then
-            skipped = skipped + 1
-        else
-            local cached = standCache[folder]
-            local model, pos
-            if cached and (now - cached.ts) < STAND_CACHE_TTL then
-                model = cached.model
-                pos = cached.pos
-            else
-                model = _findStandModel(folder)
-                if model then
-                    pos = _modelPivotPos(model)
-                end
-                standCache[folder] = {model = model, pos = pos, ts = now}
-            end
-            if not model then
-                noModel = noModel + 1
-                if verbose then print("[Stand]   " .. nm .. " -> sin Model") end
-            elseif not pos then
-                noPos = noPos + 1
-                if verbose then print("[Stand]   " .. nm .. " -> Model sin pos") end
-            else
-                tinsert(out, {folder = folder, model = model, pos = pos, name = nm})
-            end
-        end
-    end
-    if verbose then
-        print(string.format("[Stand] Purchases hijos=%d  match-prefix=%d  no-model=%d  no-pos=%d  validos=%d",
-            #kids, #kids - skipped, noModel, noPos, #out))
-    end
-    return out
-end
 
 local function _tpHrpTo(pos)
     -- v10: метка ''стенд работает'' — лимонка не дёргает персонажа 4с после
@@ -1102,199 +994,11 @@ local function _windowFocused()
     return r ~= false
 end
 
-local function _parsePriceText(s)
-    if not s then return nil end
-    s = tostring(s):gsub("%s", "")
-    local cleaned = s:gsub("[^%d%.kKmMbBtT]", "")
-    if cleaned == "" then return nil end
-    local mult = 1
-    local last = cleaned:sub(-1):lower()
-    if last == "k" then mult = 1e3
-    elseif last == "m" then mult = 1e6
-    elseif last == "b" then mult = 1e9
-    elseif last == "t" then mult = 1e12 end
-    if mult ~= 1 then cleaned = cleaned:sub(1, -2) end
-    local n = tonumber(cleaned)
-    if not n then return nil end
-    return n * mult
-end
-
-local function _getCash()
-    local ls; pcall_(function() ls = player:FindFirstChild("leaderstats") end)
-    if not ls then return nil end
-    local c; pcall_(function() c = ls:FindFirstChild("Cash") end)
-    if not c then return nil end
-    local v; pcall_(function() v = c.Value end)
-    if type(v) == "number" then return v end
-    return _parsePriceText(v)
-end
-
-local function _resolveStandGui(standName)
-    local pg; pcall_(function() pg = player:FindFirstChildOfClass("PlayerGui") end)
-    if not pg then return nil end
-    local g; pcall_(function() g = pg:FindFirstChild(standName) end)
-    if g then return g end
-    local stripped = (standName or ""):gsub("%s+", "")
-    if stripped ~= standName then
-        pcall_(function() g = pg:FindFirstChild(stripped) end)
-        if g then return g end
-    end
-    local low = stripped:lower()
-    local kids; pcall_(function() kids = pg:GetChildren() end)
-    if kids then
-        for _, c in ipairs_(kids) do
-            local nm = tostring(c.Name):gsub("%s+", ""):lower()
-            if nm == low then return c end
-        end
-    end
-    for _, suf in ipairs_({" Ground", " Top", " Base", " Floor", " Roof"}) do
-        if standName:sub(-#suf):lower() == suf:lower() then
-            local root = standName:sub(1, -#suf - 1)
-            local sub = _resolveStandGui(root)
-            if sub then return sub end
-        end
-    end
-    return nil
-end
-
-local function _extractNumber(node)
-    if not node then return nil end
-    local isVal = node:IsA("ValueBase")
-    if isVal then
-        local v; pcall_(function() v = node.Value end)
-        if type(v) == "number" then return v end
-        local n = _parsePriceText(v)
-        if n then return n end
-    end
-    local isText = node:IsA("GuiObject") and (node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox"))
-    if isText then
-        local t; pcall_(function() t = node.Text end)
-        local n = _parsePriceText(t)
-        if n then return n end
-    end
-    return nil
-end
-
-local _STAND_PRICE_DIAG_SHOWN = {}
-local function _getStandPrice(standName, debugLog)
-    local gui = _resolveStandGui(standName)
-    if not gui then return nil end
-    local node = gui
-    for _, segment in ipairs_(STAND_PRICE_PATH) do
-        local nxt; pcall_(function() nxt = node:FindFirstChild(segment) end)
-        node = nxt
-        if not node then break end
-    end
-    if node then
-        local n = _extractNumber(node)
-        if n then return n end
-        local desc; pcall_(function() desc = node:GetDescendants() end)
-        if desc then
-            for _, d in ipairs_(desc) do
-                local n2 = _extractNumber(d)
-                if n2 then return n2 end
-            end
-        end
-    end
-    local altPaths = {
-        {"Upgrade", "Cost"},
-        {"Upgrade", "Amount"},
-        {"Upgrade", "Price", "Amount"},
-        {"Upgrade", "Price", "Value"},
-        {"Cost"},
-        {"Price"},
-        {"Main", "Upgrade", "Price"},
-        {"Frame", "Upgrade", "Price"},
-    }
-    for _, p in ipairs_(altPaths) do
-        local cur = gui
-        for _, seg in ipairs_(p) do
-            local nxt; pcall_(function() nxt = cur:FindFirstChild(seg) end)
-            cur = nxt
-            if not cur then break end
-        end
-        if cur then
-            local n = _extractNumber(cur)
-            if n then return n end
-        end
-    end
-    local desc; pcall_(function() desc = gui:GetDescendants() end)
-    if desc then
-        for _, d in ipairs_(desc) do
-            local n = _extractNumber(d)
-            if n then return n end
-        end
-    end
-    if debugLog and not _STAND_PRICE_DIAG_SHOWN[standName] then
-        _STAND_PRICE_DIAG_SHOWN[standName] = true
-        print("[Stand][DIAG] " .. standName .. " GUI=" .. gui:GetFullName())
-        local kids2; pcall_(function() kids2 = gui:GetDescendants() end)
-        if kids2 then
-            local shown = 0
-            for _, d in ipairs_(kids2) do
-                if shown >= 25 then break end
-                local cls = d.ClassName
-                local nm = tostring(d.Name)
-                local txt; pcall_(function() txt = d.Text end)
-                local val; pcall_(function() val = d.Value end)
-                print(sformat("  - %s  [%s]  text=%s  value=%s",
-                    nm, tostring(cls), tostring(txt), tostring(val)))
-                shown = shown + 1
-            end
-        end
-    end
-    return nil
-end
-
--- v5.18: helper de precio que faltaba (antes 'canAffordStand' era nil -> crash en runStandPass).
--- Devuelve (puedePagar:boolean|nil, precio:number|nil, cash:number|nil).
--- nil = no se pudo determinar el precio: si STAND_REQUIRE_PRICE es true, NO TPea.
-local function canAffordStand(folder)
-    if not folder then return nil, nil, nil end
-    local name
-    pcall_(function() name = tostring(folder.Name) end)
-    local cash  = _getCash()
-    local price = name and _getStandPrice(name, false) or nil
-    if not price then
-        if STAND_REQUIRE_PRICE then return false, nil, cash end
-        return nil, nil, cash
-    end
-    if not cash then
-        return nil, price, nil
-    end
-    return (cash >= price), price, cash
-end
-
-local function _tapKeyOnce(key)
-    if not _windowFocused() then return false end
-    keypress(key)
-    task_wait()
-    keyrelease(key)
-    return true
-end
-
-local STAND_PRESS_HOLD = 0
-local function _pressKeyMany(key, n)
-    for i = 1, n do
-        if not autoStandActive then return false end
-        if not _windowFocused() then
-            task_wait(0.2)
-            return false
-        end
-        keypress(key)
-        if STAND_PRESS_HOLD > 0 then
-            task_wait(STAND_PRESS_HOLD)
-        else
-            task_wait()
-        end
-        keyrelease(key)
-    end
-    return true
-end
-
 local function _anyLiveButtons()
+    local now = tick_()
+    if _bScan.liveT and (now - _bScan.liveT) < 0.15 then return _bScan.live end
+    local live = false
     local buttons = getButtonsRealTime()
-    if #buttons == 0 then return false end
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
@@ -1302,488 +1006,19 @@ local function _anyLiveButtons()
             if a and a.inst and a.inst ~= v then buyAttempt[key] = nil; a = nil end
             local givenUp = a and a.n >= 6
             if not isBlacklisted(key, v) and not isGreyedOut(v) and not givenUp then
-                return true
+                live = true
+                break
             end
         end
     end
-    return false
+    _bScan.liveT = now
+    _bScan.live = live
+    return live
 end
 
--- ==================== AUTO STAND - MANAGE+TP HYBRID MODE ====================
-local STAND_MANAGE_PATH = {"Manage", "ManageMenu", "Body", "Frame", "Manage"}
-local STAND_MANAGE_BLANK_PREFIX = "Blank"
-local STAND_MANAGE_CLICK_DELAY  = 0.05
 
 local STAND_E_SPAM_DURATION = 1.5
-local STAND_E_SPAM_INTERVAL = 0.018
 
-local function _findScrollAncestor(obj)
-    local cur = obj
-    while cur and cur.Parent do
-        cur = cur.Parent
-        local isScroll = cur:IsA("ScrollingFrame")
-        if isScroll then return cur end
-        if cur:IsA("ScreenGui") then break end
-    end
-    return nil
-end
-
-local function _ensureVisibleInScroll(child)
-    if not child or not child.Parent then return false end
-    local sf = _findScrollAncestor(child)
-    if not sf then return true end
-    local ok, err = pcall_(function()
-        local childY    = child.AbsolutePosition.Y
-        local sfY       = sf.AbsolutePosition.Y
-        local viewportH = sf.AbsoluteWindowSize.Y
-        local childH    = child.AbsoluteSize.Y
-        local relTop    = childY - sfY
-        local relBot    = relTop + childH
-        local cur       = sf.CanvasPosition
-        if relTop < 0 then
-            sf.CanvasPosition = Vec2(cur.X, math.max(0, cur.Y + relTop - 4))
-        elseif relBot > viewportH then
-            sf.CanvasPosition = Vec2(cur.X, cur.Y + (relBot - viewportH) + 4)
-        end
-    end)
-    task_wait() ; task_wait()
-    return ok
-end
-
-local GUI_BG_COLOR_OFFSET = 0x540
-
-local STAND_INACTIVE_RGB    = {0.49, 0.49, 0.49}
-local STAND_COLOR_TOLERANCE = 0.06
-
-local function _readGuiBgColor(guiObject)
-    if not guiObject then return nil end
-    local addr; pcall_(function() addr = tonumber(guiObject.Address) end)
-    if not addr or addr <= 4096 then return nil end
-    if type(memory_read) ~= "function" then return nil end
-    local okR, r = pcall_(memory_read, "float", addr + GUI_BG_COLOR_OFFSET)
-    if not okR then return nil end
-    local okG, g = pcall_(memory_read, "float", addr + GUI_BG_COLOR_OFFSET + 4)
-    if not okG then return nil end
-    local okB, b = pcall_(memory_read, "float", addr + GUI_BG_COLOR_OFFSET + 8)
-    if not okB then return nil end
-    if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return nil end
-    if r < -0.01 or r > 1.01 or g < -0.01 or g > 1.01 or b < -0.01 or b > 1.01 then return nil end
-    return r, g, b
-end
-
-local function _isUpgradeActive(upg)
-    local r, g, b = _readGuiBgColor(upg)
-    if not r then return nil end
-    local tol = STAND_COLOR_TOLERANCE
-    local ir, ig, ib = STAND_INACTIVE_RGB[1], STAND_INACTIVE_RGB[2], STAND_INACTIVE_RGB[3]
-    if math.abs(r - ir) <= tol and math.abs(g - ig) <= tol and math.abs(b - ib) <= tol then
-        return false, r, g, b
-    end
-    return true, r, g, b
-end
-
-local STAND_INACTIVE_RETEST_AFTER = 8
-local _standInactiveSince = {}
-
-local function _readUpgradeState(upgBtn)
-    if not upgBtn then return "" end
-    local parts = {}
-    for _, childName in ipairs_({"Count", "Price", "Stack"}) do
-        local c; pcall_(function() c = upgBtn:FindFirstChild(childName) end)
-        if c then
-            local t; pcall_(function() t = c.Text end)
-            tinsert(parts, tostring(t or ""))
-        else
-            tinsert(parts, "")
-        end
-    end
-    return table.concat(parts, "|")
-end
-
-local function _shouldSkipInactive(name)
-    local t = _standInactiveSince[name]
-    if not t then return false end
-    if (tick_() - t) > STAND_INACTIVE_RETEST_AFTER then
-        _standInactiveSince[name] = nil
-        return false
-    end
-    return true
-end
-
-local function _markInactive(name) _standInactiveSince[name] = tick_() end
-local function _markActive(name)   _standInactiveSince[name] = nil end
-
-local function _findPurchaseFolderForStand(standName)
-    if not myTycoon then return nil end
-    local purchases; pcall_(function() purchases = myTycoon:FindFirstChild("Purchases") end)
-    if not purchases then return nil end
-    local f; pcall_(function() f = purchases:FindFirstChild(standName) end)
-    if f then return f end
-    local target = standName:gsub("%s+", ""):lower()
-    local kids; pcall_(function() kids = purchases:GetChildren() end)
-    if not kids then return nil end
-    for _, c in ipairs_(kids) do
-        local nm = tostring(c.Name):gsub("%s+", ""):lower()
-        if nm == target then return c end
-    end
-    return nil
-end
-
-local function _spamKeyFor(key, durationSec, intervalSec)
-    if key == 0x45 then
-        if not _windowFocused() then
-            task_wait(0.2)
-            return false
-        end
-
-        _standIsTapping = true
-        local t0 = tick_()
-        while autoStandActive do
-            if (tick_() - t0) >= durationSec then break end
-            if not _windowFocused() then break end
-            keypress(0x45)
-            task_wait(0.015)
-            keyrelease(0x45)
-            task_wait(0.015)
-        end
-        keyrelease(0x45)
-        _standIsTapping = false
-        return true
-    end
-
-    local t0 = tick_()
-    while autoStandActive and (tick_() - t0) < durationSec do
-        if not _windowFocused() then
-            task_wait(0.2)
-            return false
-        end
-        keypress(key)
-        task_wait()
-        keyrelease(key)
-        if intervalSec and intervalSec > 0 then
-            task_wait(intervalSec)
-        else
-            task_wait()
-        end
-    end
-    return true
-end
-
-local function _getManageRoot()
-    local pg; pcall_(function() pg = player:FindFirstChildOfClass("PlayerGui") end)
-    if not pg then return nil end
-    local node = pg
-    for _, seg in ipairs_(STAND_MANAGE_PATH) do
-        local nxt; pcall_(function() nxt = node:FindFirstChild(seg) end)
-        if not nxt then return nil end
-        node = nxt
-    end
-    return node
-end
-
-local function _getManageStands()
-    local out = {}
-    local root = _getManageRoot()
-    if not root then return out end
-    local kids; pcall_(function() kids = root:GetChildren() end)
-    if not kids then return out end
-    for _, c in ipairs_(kids) do
-        local isFrame = c:IsA("Frame")
-        if isFrame then
-            local nm = tostring(c.Name)
-            if nm:sub(1, #STAND_MANAGE_BLANK_PREFIX) ~= STAND_MANAGE_BLANK_PREFIX then
-                local upg; pcall_(function() upg = c:FindFirstChild("Upgrade") end)
-                if upg then
-                    local isBtn = upg:IsA("GuiButton")
-                    if isBtn then
-                        local priceLbl; pcall_(function() priceLbl = upg:FindFirstChild("Price") end)
-                        local priceText = nil
-                        if priceLbl then pcall_(function() priceText = priceLbl.Text end) end
-                        tinsert(out, {frame=c, upgrade=upg, name=nm, priceText=priceText})
-                    end
-                end
-            end
-        end
-    end
-    return out
-end
-
-local function _clickGuiButton(btn)
-    if not btn or not btn.Parent then return false end
-    local fired = false
-    if type(firesignal) == "function" then
-        pcall_(function()
-            if btn.Activated then
-                firesignal(btn.Activated, Enum.UserInputType.MouseButton1)
-                fired = true
-            end
-        end)
-        pcall_(function()
-            if btn.MouseButton1Click then
-                firesignal(btn.MouseButton1Click)
-                fired = true
-            end
-        end)
-    end
-    return fired
-end
-
-local function runManagePass(verbose)
-    local stands = _getManageStands()
-    if #stands == 0 then
-        if verbose then
-            print("[Stand][Manage+TP] Manage no encontrado o vacio. Abri el menu Manage al menos una vez.")
-        end
-        return "done"
-    end
-    print(sformat("[Stand][Manage+TP] Pasada start, %d desbloqueados", #stands))
-    local tapped, skipped_color, skipped_cache, fallback_used = 0, 0, 0, 0
-    for i, s in ipairs_(stands) do
-        if not autoStandActive then return "off" end
-        local active, cr, cg, cb = _isUpgradeActive(s.upgrade)
-        if active == false then
-            skipped_color = skipped_color + 1
-            if verbose then
-                print(sformat("[Stand][Manage+TP] [%d/%d] %s -> INACTIVO (gris %.2f,%.2f,%.2f)",
-                    i, #stands, tostring(s.name), cr or 0, cg or 0, cb or 0))
-            end
-            task_wait(0.005)
-            continue
-        end
-        local useFallback = (active == nil)
-        if useFallback then
-            fallback_used = fallback_used + 1
-            if _shouldSkipInactive(s.name) then
-                skipped_cache = skipped_cache + 1
-                task_wait(0.005)
-                continue
-            end
-        end
-        local folder = _findPurchaseFolderForStand(s.name)
-        if not folder then
-            print(sformat("[Stand][Manage+TP] [%d/%d] %s -> no Purchases match",
-                i, #stands, tostring(s.name)))
-            task_wait(STAND_CYCLE_PAUSE)
-            continue
-        end
-        local model = _findStandModel(folder)
-        local pos   = model and _modelPivotPos(model) or nil
-        if not pos then
-            print(sformat("[Stand][Manage+TP] [%d/%d] %s -> sin pos TPeable",
-                i, #stands, tostring(s.name)))
-            task_wait(STAND_CYCLE_PAUSE)
-            continue
-        end
-        local before = useFallback and _readUpgradeState(s.upgrade) or nil
-        if not _tpHrpTo(pos) then
-            print(sformat("[Stand][Manage+TP] [%d/%d] %s -> TP fallo",
-                i, #stands, tostring(s.name)))
-            task_wait(STAND_CYCLE_PAUSE)
-            continue
-        end
-        _spamKeyFor(STAND_KEY, STAND_E_SPAM_DURATION, STAND_E_SPAM_INTERVAL)
-        tapped = tapped + 1
-        if useFallback then
-            local after = _readUpgradeState(s.upgrade)
-            if before == after then
-                _markInactive(s.name)
-                print(sformat("[Stand][Manage+TP] [%d/%d] %s -> [fallback] sin cambio, INACTIVO %ds",
-                    i, #stands, tostring(s.name), STAND_INACTIVE_RETEST_AFTER))
-            else
-                _markActive(s.name)
-                print(sformat("[Stand][Manage+TP] [%d/%d] %s -> [fallback] COMPRO! (%s->%s)",
-                    i, #stands, tostring(s.name), tostring(before), tostring(after)))
-            end
-        else
-            print(sformat("[Stand][Manage+TP] [%d/%d] %s -> ACTIVO TP+E %.1fs (color %.2f,%.2f,%.2f)",
-                i, #stands, tostring(s.name), STAND_E_SPAM_DURATION, cr or 0, cg or 0, cb or 0))
-        end
-        task_wait(STAND_CYCLE_PAUSE)
-    end
-    print(sformat("[Stand][Manage+TP] Pasada end. tap=%d skip_color=%d skip_cache=%d fallback=%d",
-        tapped, skipped_color, skipped_cache, fallback_used))
-    return "done"
-end
-
--- ==================== TIER 1: REMOTE SCAN (hookless) ====================
-local ReplicatedStorage = nil
-pcall_(function() ReplicatedStorage = game:GetService("ReplicatedStorage") end)
-
-local cachedUpgradeRemotes = nil
-local cachedRemoteScanTime = 0
-local REMOTE_CACHE_TTL = 30
-
-local function findUpgradeRemotes()
-    local candidates = {}
-    local function scan(parent)
-        local kids
-        pcall_(function() kids = parent:GetDescendants() end)
-        if not kids then return end
-        for _, d in ipairs_(kids) do
-            local isRF = d:IsA("RemoteFunction")
-            if isRF and d.Name:lower():match("upgrade") then
-                tinsert(candidates, d)
-            end
-            local isRE = d:IsA("RemoteEvent")
-            if isRE and d.Name:lower():match("upgrade") then
-                tinsert(candidates, d)
-            end
-        end
-    end
-    if ReplicatedStorage then scan(ReplicatedStorage) end
-    if myTycoon then pcall_(function() scan(myTycoon) end) end
-    return candidates
-end
-
-local function getUpgradeRemotes()
-    local now = tick_()
-    if cachedUpgradeRemotes and (now - cachedRemoteScanTime) < REMOTE_CACHE_TTL then
-        return cachedUpgradeRemotes
-    end
-    cachedUpgradeRemotes = findUpgradeRemotes()
-    cachedRemoteScanTime = now
-    return cachedUpgradeRemotes
-end
-
-local function tryRemoteUpgrade(standName, level)
-    local remotes = getUpgradeRemotes()
-    if not remotes or #remotes == 0 then return false, "no_remotes" end
-    for _, remote in ipairs_(remotes) do
-        local ok, res = pcall_(function()
-            if remote:IsA("RemoteFunction") then
-                return remote:InvokeServer(standName, level or 1)
-            else
-                remote:FireServer(standName, level or 1)
-                return true
-            end
-        end)
-        if ok then return true, "ok" end
-    end
-    return false, "all_remotes_failed"
-end
-
--- ==================== TIER 2: GUI SIGNAL (hookless) ====================
-local function fireUpgradeGui(standName)
-    local playerGui
-    pcall_(function() playerGui = player:WaitForChild("PlayerGui", 2) end)
-    if not playerGui then return false, "no_playergui" end
-
-    local function scanGui(parent)
-        local kids
-        pcall_(function() kids = parent:GetDescendants() end)
-        if not kids then return false, "no_descendants" end
-        for _, d in ipairs_(kids) do
-            local ok, isButton = pcall_(function()
-                return d:IsA("TextButton") or d:IsA("ImageButton")
-            end)
-            if isButton then
-                local nameMatch = false
-                pcall_(function()
-                    local n = d.Name:lower()
-                    nameMatch = n:match("upgrade") or n:match(standName:lower())
-                end)
-                if nameMatch then
-                    local fired = false
-                    pcall_(function()
-                        if d.MouseButton1Click then
-                            firesignal(d.MouseButton1Click)
-                            fired = true
-                        elseif d.Activated then
-                            firesignal(d.Activated)
-                            fired = true
-                        end
-                    end)
-                    if fired then return true, "signal_fired" end
-                end
-            end
-        end
-        return false, "no_button_found"
-    end
-    return scanGui(playerGui)
-end
-
--- ==================== TIER 3: PROXIMITY PROMPT (hookless) ====================
-local function triggerProximityPrompt(standModel)
-    local desc
-    pcall_(function() desc = standModel:GetDescendants() end)
-    if not desc then return false, "no_descendants" end
-    for _, d in ipairs_(desc) do
-        local isPrompt = d:IsA("ProximityPrompt")
-        if isPrompt then
-            local triggered = false
-            pcall_(function()
-                if fireproximityprompt then
-                    fireproximityprompt(d)
-                    triggered = true
-                else
-                    d:InputHoldBegin()
-                    task_wait(d.HoldDuration + 0.05)
-                    d:InputHoldEnd()
-                    triggered = true
-                end
-            end)
-            if triggered then return true, "prompt_fired" end
-        end
-    end
-    return false, "no_prompt"
-end
-
--- ==================== TIERED EXECUTION WITH DIAGNOSTICS ====================
-local function tieredUpgrade(target, level)
-    local name = target.name or "?"
-    local pos = target.pos
-
-    if TIER_REMOTE_FIRST then
-        local ok, reason = tryRemoteUpgrade(name, level)
-        if ok then
-            if TIER_DIAGNOSTICS then print("[Tier] Remote OK: " .. name) end
-            tierStats.remote = tierStats.remote + 1
-            return true, "remote"
-        else
-            if TIER_DIAGNOSTICS then print("[Tier] Remote FAIL (" .. reason .. "): " .. name) end
-        end
-    end
-
-    if TIER_GUI_SIGNAL then
-        local ok2, reason2 = fireUpgradeGui(name)
-        if ok2 then
-            if TIER_DIAGNOSTICS then print("[Tier] GUI OK: " .. name) end
-            tierStats.gui = tierStats.gui + 1
-            return true, "gui"
-        else
-            if TIER_DIAGNOSTICS then print("[Tier] GUI FAIL (" .. reason2 .. "): " .. name) end
-        end
-    end
-
-    if TIER_PROXIMITY then
-        local ok3, reason3 = triggerProximityPrompt(target.model)
-        if ok3 then
-            if TIER_DIAGNOSTICS then print("[Tier] Proximity OK: " .. name) end
-            tierStats.proximity = tierStats.proximity + 1
-            return true, "proximity"
-        else
-            if TIER_DIAGNOSTICS then print("[Tier] Proximity FAIL (" .. reason3 .. "): " .. name) end
-        end
-    end
-
-    if TIER_FALLBACK_TP then
-        if pos and _tpHrpTo(pos) then
-            task_wait(STAND_TP_SETTLE)
-            for _ = 1, STAND_PRESSES do
-                keypress(STAND_KEY)
-                keyrelease(STAND_KEY)
-            end
-            if TIER_DIAGNOSTICS then print("[Tier] TP+Key OK: " .. name) end
-            tierStats.tp = tierStats.tp + 1
-            return true, "tp"
-        else
-            if TIER_DIAGNOSTICS then print("[Tier] TP FAIL: " .. name) end
-        end
-    end
-
-    tierStats.fail = tierStats.fail + 1
-    return false, "all_tiers_failed"
-end
 
 -- v15: апгрейд по Locations (реальные корды из СВОЕГО тайкуна) + селектор.
 -- Заменяет старый поиск пустышек из Purchases, который не давал позиции для ТП.
@@ -1832,80 +1067,11 @@ local function runLocationsPass(firstRun)
             task_wait(STAND_CYCLE_PAUSE)
         end
     end
-    -- v18.14: стенд отдалял камеру -> верни лемону ПЕРВОЕ ЛИЦО, иначе он не
-    -- собирает. Сброс annAfk заставит лемон заново зайти в АФК-режим (зум в 1-е
-    -- лицо). Якорь возврата защищён ('if not LSM.anchor' в лемон-блоке).
-    if lemonFarmActive then
-        LSM.zoom(1)
-        LSM.annAfk = false
-    end
+    -- v18.15: НИЧЕГО не зумим обратно здесь. Лемон сам зайдёт в 1-е лицо, когда
+    -- получит ход (самовосстановление по LSM.zoomedIn в лемон-цикле) - это
+    -- происходит через ~2-4с после стенда (пока LSM.standBusyT свежий, лемон
+    -- ждёт), т.е. камера НЕ прыгает обратно мгновенно, как просил оператор.
     if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
-    return "done"
-end
-
-local function runStandPass(firstRun)
-    local targets = getStandTargets(firstRun)
-    if #targets == 0 then
-        if firstRun then print("[Stand] No hay stands TPables (prefix='" .. (STAND_FOLDER_PREFIX or "") .. "')") end
-        return "done"
-    end
-
-    -- v7.5: пропускаем стенды, которые уже обслуживает Manage-пасс,
-    -- чтобы не ТПшиться к ним второй раз. Остаются только ''невидимые'' для
-    -- Manage (как физический Lemon stand).
-    local covered = {}
-    for _, ms in ipairs_(_getManageStands()) do
-        covered[tostring(ms.name):gsub("%s+", ""):lower()] = true
-    end
-    if firstRun then
-        for i2, t2 in ipairs_(targets) do
-            local cov = covered[tostring(t2.name):gsub("%s+", ""):lower()] and " (manage)" or " (TP+E)"
-            print("[Stand] target " .. i2 .. ": " .. tostring(t2.name) .. cov)
-        end
-    end
-    local tapped = 0
-    local skipped_price = 0
-    for i, t in ipairs_(targets) do
-        if covered[tostring(t.name):gsub("%s+", ""):lower()] then
-            continue
-        end
-        if not ScriptActive or not autoStandActive then return "off" end
-
-        if STAND_USE_PRICE_GATE then
-            local canAfford, price, cash = canAffordStand(t.folder)
-            if canAfford == false then
-                skipped_price = skipped_price + 1
-                if firstRun then
-                    print(string.format("[Stand] [%d/%d] SKIP precio: %s (necesita %.0f, tienes %.0f)",
-                        i, #targets, tostring(t.name), price or 0, cash or 0))
-                end
-                continue
-            end
-        end
-
-        if autoBuyActive and i % STAND_RECHECK_EVERY == 0 then
-            local alive = not allButtonsDead()
-            if alive then return "done" end
-        end
-
-        -- v7.5: тиры remote/gui-signal рапортовали ''успех'' без реального
-        -- апгрейда, и ТП не запускался. Теперь как в Manage-пассе: ТП + спам E.
-        local ok = false
-        if t.pos and _tpHrpTo(t.pos) then
-            task_wait(STAND_TP_SETTLE)
-            _spamKeyFor(STAND_KEY, STAND_E_SPAM_DURATION, STAND_E_SPAM_INTERVAL)
-            ok = true
-            print(sformat("[Stand][TP+E] [%d/%d] %s", i, #targets, tostring(t.name)))
-        else
-            print(sformat("[Stand][TP+E] [%d/%d] %s -> TP fail", i, #targets, tostring(t.name)))
-        end
-        if ok then tapped = tapped + 1 end
-
-        task_wait(STAND_CYCLE_PAUSE)
-    end
-    print(string.format("[Stand] Pasada end. tap=%d  skip_precio=%d  tiers=%s",
-        tapped, skipped_price,
-        "R:"..tierStats.remote.." G:"..tierStats.gui.." P:"..tierStats.proximity.." T:"..tierStats.tp))
     return "done"
 end
 
@@ -1992,7 +1158,10 @@ _wrap("autobuy-worker", function()
                     appendNewButtons()
                 end
             end
-            task_wait(0.05)
+            -- v18.15: ХОЛОСТОЙ ход (покупать нечего) - 0.12с вместо 0.05с.
+            -- Покупки не замедляет (когда очередь не пуста, сюда не попадаем),
+            -- а холостые сканы режутся в ~2.5 раза.
+            task_wait(0.12)
             continue
         end
 
@@ -2260,6 +1429,7 @@ end
 function LSM.zoom(dir)
     if LSM.mode == "cd" or LSM.mode == "sig" then return end
     if type(mousescroll) ~= "function" then return end
+    LSM.zoomedIn = dir > 0   -- v18.15: трекаем зум - лемон сам перезумится, когда получит ход
     LSM.lastBot = tick_()
     for _ = 1, CFG.zoomTicks do
         pcall_(mousescroll, CFG.zoomStep * dir)
@@ -2501,18 +1671,11 @@ _wrap("lemon-farm", function()
                         end
                     end)
                 end
-                -- v13.5: зум возвращён - так было в золотой версии
+                -- v18.15: сам зум переехал в начало фарма (блок LSM.zoomedIn ниже):
+                -- так он срабатывает и после стенд-пасса (тот отдаляет камеру и
+                -- может прерваться где угодно), и не дёргает камеру раньше, чем
+                -- лемон реально получит ход.
                 print("[Lemon] AFK -> zoom + farm")
-                pcall_(function() camera = Workspace.CurrentCamera end)   -- v14: камера могла пересоздаться при респавне
-                LSM.zoom(1)
-                -- v13.7: взгляд вверх сразу, пока готовится первое дерево
-                pcall_(function()
-                    local chrA = player.Character
-                    local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
-                    if hA then
-                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
-                    end
-                end)
             else
                 print("[Lemon] input detected -> back to your spot")
                 LSM.returnHome()
@@ -2524,6 +1687,22 @@ _wrap("lemon-farm", function()
         end
         local standBusy = autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow then
+            -- v18.15: САМОВОССТАНОВЛЕНИЕ зума (золотой блок v13.5/13.7, перенесён
+            -- сюда). Камера не в 1-м лице (старт, возврат после input, стенд её
+            -- отдалял) -> зумимся и сразу смотрим вверх. Стенд держит standBusyT
+            -- свежим, так что после стендов сюда попадаем через ~2-4с - камера
+            -- НЕ прыгает обратно мгновенно.
+            if not LSM.zoomedIn then
+                pcall_(function() camera = Workspace.CurrentCamera end)   -- v14: камера могла пересоздаться при респавне
+                LSM.zoom(1)
+                pcall_(function()
+                    local chrA = player.Character
+                    local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
+                    if hA then
+                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
+                    end
+                end)
+            end
             lemonFailCount = {}
 
             local pass            = 0
@@ -2702,6 +1881,12 @@ local function pollInput()
             end
         end)
     end
+
+    -- v18.15: всё ниже (статус-строки, чтение лейблов лозы, таймер минигейма)
+    -- обновляется ~7 раз/сек, а не каждый кадр - заметная часть лагов меню у
+    -- людей. Ввод/активность выше остались по-кадровыми.
+    if (nowA - (S.statusT or 0)) < 0.15 then return end
+    S.statusT = nowA
 
     -- Статус-строки с делеями: лимонка + стенд + лоза
     local vx = 960
@@ -2940,6 +2125,11 @@ _wrap("auto-deal", function()
                 if not pg then return end
                 local phone = pg:FindFirstChild("Phone")
                 if not phone then return end
+                -- v18.15: телефон выключен (Enabled=false) -> не обходим его дерево
+                -- зря каждые полсекунды. Семантика та же: shownB всё равно отбросил
+                -- бы все кнопки выключенного ScreenGui.
+                local phEn; pcall_(function() phEn = phone.Enabled end)
+                if phEn == false then return end
                 -- кандидаты: все кнопки телефона с текстом
                 local btns, bn = {}, 0
                 for _, d in ipairs_(phone:GetDescendants()) do
@@ -3033,14 +2223,15 @@ function MG.shown(o)
     end
     return true
 end
--- найти кнопку по тексту во ВСЁМ PlayerGui; needPos=true -> только с реальной
--- экранной позицией (PICK-кнопки иногда 0,0 пока не отрисовались).
-function MG.findBtn(want, needPos)
-    local pg = player:FindFirstChildOfClass("PlayerGui")
-    if not pg then return nil end
+-- найти кнопку по тексту; needPos=true -> только с реальной экранной позицией.
+-- v18.15: сперва ищем в ИЗВЕСТНЫХ контейнерах минигейма (зонды: CHEER/EXIT в
+-- MinigameRace, PICK в PickGui, PLAY в PromptGui) - они маленькие. Полный обход
+-- PlayerGui (тысячи элементов, лагал меню по 3-4 раза за тик) остался лишь
+-- страховкой не чаще раза в 1.5с.
+function MG.scanBtns(root, want, needPos)
     local hit
     pcall_(function()
-        for _, d in ipairs_(pg:GetDescendants()) do
+        for _, d in ipairs_(root:GetDescendants()) do
             local cn = tostring_(d.ClassName)
             if (cn == "TextButton" or cn == "ImageButton") and MG.shown(d) and MG.text(d):find(want) then
                 if needPos then
@@ -3053,6 +2244,25 @@ function MG.findBtn(want, needPos)
         end
     end)
     return hit
+end
+function MG.findBtn(want, needPos)
+    local pg = player:FindFirstChildOfClass("PlayerGui")
+    if not pg then return nil end
+    for _, nm in ipairs_({"MinigameRace", "PickGui", "PromptGui"}) do
+        local g
+        pcall_(function() g = pg:FindFirstChild(nm) end)
+        if g then
+            local hit = MG.scanBtns(g, want, needPos)
+            if hit then return hit end
+        end
+    end
+    -- страховка ПО-КНОПОЧНО (аудит: общий таймер отдавал весь бюджет CHEER'у,
+    -- и EXIT/PICK/PLAY никогда не добирались до полного скана)
+    local now = tick_()
+    if type(MG.fsT) ~= "table" then MG.fsT = {} end
+    if (now - (MG.fsT[want] or 0)) < 1.5 then return nil end
+    MG.fsT[want] = now
+    return MG.scanBtns(pg, want, needPos)
 end
 function MG.click(btn)
     local ap, az
@@ -3143,7 +2353,8 @@ function MG.spamCheer(btn)
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     pcall_(function() mousemoveabs(cx, cy) end)   -- встаём на CHEER один раз
     local n = 0
-    while MG.active and ScriptActive do
+    local tCap = tick_()   -- v18.15: страховка - гонка длится <1мин, дольше 75с не спамим
+    while MG.active and ScriptActive and (tick_() - tCap) < 75 do
         LSM.lastBot = tick_()
         pcall_(function() mouse1press(); mouse1release() end)
         n = n + 1
@@ -3228,8 +2439,12 @@ _wrap("auto-minigame", function()
     while ScriptActive do
         if MG.active then
             pcall_(function()
-                -- 1) ГОНКА: CHEER -> непрерывный спам
-                local cheer = MG.findBtn("CHEER", true)
+                -- 1) ГОНКА: CHEER -> непрерывный спам.
+                -- v18.15: БЕЗ needPos! У кнопки гонки AbsolutePosition бывает 0,0
+                -- (как у PICK-билбордов; зависит от разрешения/клиента) -> CHEER
+                -- не находился, raceEndT не ставился, и EXIT после гонки тоже не
+                -- жался. Позиция кнопки и не нужна: спамим по доле экрана.
+                local cheer = MG.findBtn("CHEER")
                 if cheer then
                     LSM.standBusyT = tick_()
                     MG.exitTries = 0   -- новая гонка -> сбрасываем счётчики попыток
@@ -3243,11 +2458,17 @@ _wrap("auto-minigame", function()
                 -- лейблах -> скрипт 40с долбил курсор, нельзя было двигать камеру.
                 local justRaced = (tick_() - (MG.raceEndT or 0)) < 40
                 -- 2) КОНЕЦ ГОНКИ: видна кнопка EXIT (та же MinigameRace.Button, что
-                -- была CHEER) -> жмём по НЕСКОЛЬКИМ высотам (точную позицию не
-                -- знаем). Макс 6 попыток за гонку.
-                if justRaced and (MG.exitTries or 0) < 6 and (MG.findBtn("EXIT") or MG.resultUp()) then
+                -- была CHEER) -> кликаем ПО САМОЙ КНОПКЕ (если у неё есть позиция)
+                -- плюс по нескольким высотам. Макс 6 попыток за гонку.
+                -- v18.15: ВИДИМАЯ кнопка EXIT срабатывает и без justRaced (если
+                -- CHEER-фаза была пропущена, гонку всё равно надо закрыть);
+                -- ненадёжный resultUp остаётся под защитой justRaced.
+                local exitBtn = (MG.exitTries or 0) < 6 and MG.findBtn("EXIT") or nil
+                if (MG.exitTries or 0) < 6 and (exitBtn or (justRaced and MG.resultUp())) then
                     LSM.standBusyT = tick_()
                     MG.exitTries = (MG.exitTries or 0) + 1
+                    if not justRaced then MG.raceEndT = tick_() - 30 end   -- короткое окно (10с) для чека
+                    if exitBtn then MG.click(exitBtn) end
                     MG.clickRatio(0.5, 0.80); MG.clickRatio(0.5, 0.86); MG.clickRatio(0.5, 0.91)
                     task_wait(0.6)
                     return
@@ -3284,7 +2505,7 @@ _wrap("auto-minigame", function()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
                 for _ = 1, 12 do
                     if not MG.active then break end
-                    if MG.findBtn("PICK") or MG.findBtn("CHEER", true) then break end   -- минигейм пошёл
+                    if MG.findBtn("PICK") or MG.findBtn("CHEER") then break end   -- минигейм пошёл
                     keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
                 task_wait(0.3)
