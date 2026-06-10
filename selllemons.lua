@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.5 — таймер-цикл убит (botPhase) | лимонка всегда классика | Cash Vine TP + 4ч таймер ]] --
+-- [[ SELL LEMONS v12.6 — лоза ищется по всей карте | lookAt не глотается | зум глубже ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -171,7 +171,7 @@ end
 local CFG = {
     buyWindow = 0.45,   -- окно подтверждения покупки (worker)
     afkDelay  = 5,      -- сек без инпута до старта лимонки
-    zoomTicks = 16,     -- щелчков скролла в первое лицо (было 10 - не хватало)
+    zoomTicks = 22,     -- щелчков скролла в первое лицо (лишние на максимуме безвредны)
     zoomStep  = 1,      -- если зум не в ту сторону - поставить -1
     standRest = 60,     -- АвтоСтенд проходится раз в минуту, когда лимонка включена
     vineCd    = 4 * 3600,   -- кулдаун Cash Vine (4 часа)
@@ -1997,14 +1997,14 @@ local function processLemon(v, hrp)
     -- дёргается только пока тебя нет.
     local vp = v.Position
     local tpX, tpY, tpZ = vp.X, vp.Y - 4, vp.Z
-    pcall_(function()   -- ошибки тут не должны ронять restoreTreeCanQuery выше по стеку
-        hrp.CFrame = CF(tpX, tpY, tpZ)
-        task_wait(LEMON_TP_WAIT)
-
-        LSM.lastBot = tick_()
-        camera.lookAt(Vec3(tpX, tpY, tpZ), vp)   -- в 1-м лице это разворачивает взгляд вверх на фрукт
-        task_wait(LEMON_CAM_WAIT)
-
+    -- v12.6: шаги в РАЗДЕЛЬНЫХ pcall: раньше ошибка на ТП молча глотала
+    -- lookAt и клики - вот почему иногда ''не поднимал голову''
+    pcall_(function() hrp.CFrame = CF(tpX, tpY, tpZ) end)
+    task_wait(LEMON_TP_WAIT)
+    LSM.lastBot = tick_()
+    pcall_(function() camera.lookAt(Vec3(tpX, tpY, tpZ), vp) end)
+    task_wait(LEMON_CAM_WAIT)
+    pcall_(function()
         local vps = camera.ViewportSize
         mousemoveabs(mfloor(vps.X / 2), mfloor(vps.Y / 2))
         mouse1click()
@@ -2277,19 +2277,30 @@ local function pollInput()
     -- Cash Vine: запрос ТП из меню (CFG.vineGo ставит коллбэк тоггла)
     if CFG.vineGo then
         CFG.vineGo = false
-        local vp7
-        pcall_(function()
-            local sewer = Workspace:FindFirstChild("Sewer")
-            local folder = sewer and sewer:FindFirstChild("CashVine")
-            if folder then
-                local m = folder:FindFirstChild("CashVine")
-                if m then vp7 = _modelPivotPos(m) end
-                if not vp7 then
-                    local d = folder:FindFirstChild("VineDoor")
-                    if d then vp7 = d.Position end
+        local vp7 = LSM.vinePos
+        if not vp7 then
+            -- v12.6: Sewer может быть вложен глубже - ищем CashVine по всей
+            -- карте (один раз, потом кэш)
+            pcall_(function()
+                for _, d in ipairs_(Workspace:GetDescendants()) do
+                    if d.Name == "CashVine" and (d:IsA("Folder") or d:IsA("Model")) then
+                        local hit
+                        local door = d:FindFirstChild("VineDoor")
+                        if door and door:IsA("BasePart") then hit = door.Position end
+                        if not hit then
+                            local m = d:FindFirstChild("CashVine")
+                            if m and m ~= d then hit = _modelPivotPos(m) end
+                        end
+                        if not hit and d:IsA("Model") then hit = _modelPivotPos(d) end
+                        if hit then
+                            vp7 = hit
+                            break
+                        end
+                    end
                 end
-            end
-        end)
+            end)
+            if vp7 then LSM.vinePos = vp7 end
+        end
         if vp7 then
             pcall_(function()
                 local chr = player.Character
