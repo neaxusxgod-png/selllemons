@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.7 — голова вверх сразу: подготовка дерева ускорена без смены семантики ]] --
+-- [[ SELL LEMONS v13.8 — Auto Deal v3: точный путь PlayerGui.Phone, верхняя кнопка с любым текстом ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2496,34 +2496,22 @@ RunService.RenderStepped:Connect(function()
     if not ok then reportErr("ui-input", err) end
 end)
 
--- ==================== AUTO DEAL (v13.2: телефон со сделками) ====================
--- Периодически вылазит попап-телефон с кнопками Deal./Go higher./Nvm.
--- Верхняя (Deal.) просто даёт деньги - жмём её автоматически: сначала
--- firesignal, если попап не закрылся - реальный клик по центру кнопки.
+-- ==================== AUTO DEAL v3 (точный путь: PlayerGui.Phone) ====================
+-- Зонд показал: телефон = ScreenGui "Phone" в PlayerGui. Тексты верхних кнопок
+-- каждый раз разные, нижняя всегда отказ (No./Nvm.) - жмём ВЕРХНЮЮ по позиции.
+-- ВАЖНО (уроки зондов): IsA и чтение .Visible в Матче ненадёжны - классы
+-- сравниваем по ClassName, видимость читаем через pcall (nil = не блокирует).
 _wrap("auto-deal", function()
-    local function shown(o)
-        local cur = o
-        while cur and cur:IsA("GuiObject") do
-            if cur.Visible == false then return false end
-            cur = cur.Parent
-        end
-        if cur and cur.ClassName == "ScreenGui" then
-            local en = true
-            pcall_(function() en = cur.Enabled end)
-            return en ~= false
-        end
-        return cur ~= nil
-    end
-    -- v13.6: тексты кнопок КАЖДЫЙ РАЗ разные (Deal./Roger./...), но нижняя
-    -- всегда отказ (No./Nvm.). Находим телефон по отказу, жмём ВЕРХНЮЮ кнопку
-    -- блока. Кнопки могут быть ImageButton с TextLabel внутри.
     local function btnText(b)
         local t
         pcall_(function() t = b.Text end)
         if t and t ~= "" then return tostring_(t) end
         pcall_(function()
             for _, c in ipairs_(b:GetDescendants()) do
-                if c:IsA("TextLabel") then t = c.Text break end
+                if tostring_(c.ClassName) == "TextLabel" then
+                    t = c.Text
+                    break
+                end
             end
         end)
         return tostring_(t or "")
@@ -2532,51 +2520,73 @@ _wrap("auto-deal", function()
         s = s:lower():gsub("[%s%.%!]", "")
         return s == "no" or s == "nvm"
     end
+    local function shownB(o)
+        local cur = o
+        for _ = 1, 20 do
+            if not cur then return true end
+            local cn = tostring_(cur.ClassName)
+            if cn == "ScreenGui" then
+                local en
+                pcall_(function() en = cur.Enabled end)
+                return en ~= false
+            end
+            if cn == "PlayerGui" or cn == "Player" then return true end
+            local vis
+            pcall_(function() vis = cur.Visible end)
+            if vis == false then return false end
+            cur = cur.Parent
+        end
+        return true
+    end
     while ScriptActive do
         if autoDealActive then
             pcall_(function()
                 local pg = player:FindFirstChildOfClass("PlayerGui")
                 if not pg then return end
-                local cont = LSM.dealRoot
-                if not (cont and cont.Parent) then
-                    cont = nil
-                    if (tick_() - (LSM.dealScanT or 0)) > 2 then
-                        LSM.dealScanT = tick_()
-                        for _, d in ipairs_(pg:GetDescendants()) do
-                            if (d:IsA("TextButton") or d:IsA("ImageButton")) and isReject(btnText(d)) then
-                                cont = d.Parent
-                                break
-                            end
+                local phone = pg:FindFirstChild("Phone")
+                if not phone then return end
+                -- кандидаты: все кнопки телефона с текстом
+                local btns, bn = {}, 0
+                for _, d in ipairs_(phone:GetDescendants()) do
+                    local cn = tostring_(d.ClassName)
+                    if cn == "TextButton" or cn == "ImageButton" then
+                        local t = btnText(d)
+                        if t ~= "" and t ~= "nil" and shownB(d) then
+                            bn = bn + 1
+                            btns[bn] = d
                         end
-                        LSM.dealRoot = cont
                     end
                 end
-                if cont and cont.Parent then
-                    local best, bestY
-                    for _, s in ipairs_(cont:GetChildren()) do
-                        if (s:IsA("TextButton") or s:IsA("ImageButton")) and shown(s) then
-                            local y = s.AbsolutePosition.Y
-                            if not bestY or y < bestY then bestY = y; best = s end
-                        end
+                if bn < 2 then return end   -- телефон закрыт/пустой
+                -- верхняя по экрану
+                local best, bestY
+                for i = 1, bn do
+                    local y
+                    pcall_(function() y = btns[i].AbsolutePosition.Y end)
+                    if y and (not bestY or y < bestY) then
+                        bestY = y
+                        best = btns[i]
                     end
-                    if best and not isReject(btnText(best)) then
+                end
+                if not best or isReject(btnText(best)) then return end
+                LSM.lastBot = tick_()
+                _clickGuiButton(best)
+                task_wait(0.3)
+                if best.Parent and shownB(best) then
+                    -- firesignal не закрыл телефон: реальный клик по центру кнопки
+                    local apos, asz
+                    pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
+                    if apos and asz then
+                        local inset = 0
+                        pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
                         LSM.lastBot = tick_()
-                        _clickGuiButton(best)
-                        task_wait(0.3)
-                        if best.Parent and shown(best) then
-                            local apos = best.AbsolutePosition
-                            local asz  = best.AbsoluteSize
-                            local inset = 0
-                            pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
-                            LSM.lastBot = tick_()
-                            mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
-                            mouse1click()
-                            task_wait(0.1)
-                        end
-                        rprint("[Deal] accepted: " .. btnText(best))
-                        task_wait(1)
+                        mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
+                        mouse1click()
+                        task_wait(0.1)
                     end
                 end
+                rprint("[Deal] accepted: " .. btnText(best))
+                task_wait(1)
             end)
         end
         task_wait(0.5)
