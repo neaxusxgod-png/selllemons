@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.7 — состояние тогглов/чекбоксов сохраняется и подтягивается (своё хранилище) ]] --
+-- [[ SELL LEMONS v18.8 — фикс фриза: стенд-камера и CHEER теперь ~20/сек, не каждый кадр ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1799,21 +1799,19 @@ local function runLocationsPass(firstRun)
         if standEnabled[s.name] ~= false then
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
-                -- v18.5: камера ПРЯМО СВЕРХУ. lookAt КАЖДЫЙ кадр (раньше раз в
-                -- 0.04с - дефолтная камера успевала сносить вид, выходил лёгкий
-                -- наклон "на 10"). Теперь у неё нет свободного кадра -> держится.
+                -- v18.8: камера сверху, но БЕЗ фриза. Раньше lookAt каждый кадр
+                -- (v18.5) ломал игру. Теперь раз в 0.05с (≈20/сек) - вид держится
+                -- достаточно, а игра не лагает. E жмём в том же цикле.
                 local eye = s.pos + Vec3(0, 32, 8)
                 _standIsTapping = true   -- автобай-воркер уступает на время спама
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
                     LSM.lastBot = tick_()
                     pcall_(function() camera.lookAt(eye, s.pos) end)
-                    if _windowFocused() then keypress(STAND_KEY) end
-                    task_wait()
-                    LSM.lastBot = tick_()
-                    pcall_(function() camera.lookAt(eye, s.pos) end)
-                    keyrelease(STAND_KEY)
-                    task_wait()
+                    if _windowFocused() then
+                        keypress(STAND_KEY); task_wait(0.02); keyrelease(STAND_KEY)
+                    end
+                    task_wait(0.03)
                 end
                 _standIsTapping = false
                 tapped = tapped + 1
@@ -3104,15 +3102,16 @@ function MG.spamCheer(btn)
     local n = 0
     while MG.active and ScriptActive do
         LSM.lastBot = tick_()
-        pcall_(function() mouse1press(); mouse1release(); mouse1press(); mouse1release() end)
+        pcall_(function() mouse1press(); mouse1release() end)
         n = n + 1
-        if n % 16 == 0 then
+        if n % 8 == 0 then
             local ok, still = pcall_(function() return btn.Parent and MG.text(btn):find("CHEER") end)
             if not (ok and still) then break end   -- гонка кончилась / кнопка пропала
             pcall_(function() mousemoveabs(cx, cy) end)   -- держим курсор на кнопке
             LSM.standBusyT = tick_()
         end
-        task_wait()   -- один кадр = максимально быстро
+        task_wait(0.05)   -- v18.8: ≈20 кликов/сек - быстро, но БЕЗ фриза (раньше
+        -- было каждый кадр + 2 клика -> FPS падал в пол)
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
