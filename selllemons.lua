@@ -285,20 +285,6 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
-        if val then
-            stopAll()
-            task.delay(0.1, function()
-                pcall_(function() UIRef.t.StopAll:SetValue(false) end)
-            end)
-        end
-    end):addKeybind("5", "Toggle", true, function()
-        stopAll()
-        task.delay(0.1, function()
-            pcall_(function() UIRef.t.StopAll:SetValue(false) end)
-        end)
-    end)
-
     pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
