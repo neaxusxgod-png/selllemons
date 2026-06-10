@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v14 — ПРОВЕРЯЕМЫЙ прицел (WorldToScreen + довод мышью) | КД 6с | слот 5с | свежая камера ]] --
+-- [[ SELL LEMONS v14.1 — Auto Deal: невидимая цепочка сигналов + возврат курсора при фоллбэке ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2610,20 +2610,31 @@ _wrap("auto-deal", function()
                     end
                 end
                 if not best or isReject(btnText(best)) then return end
+                -- v14.1: НЕВИДИМОЕ нажатие: полная цепочка сигналов кнопки
+                -- (игры часто слушают Down/Up, а не Click)
                 LSM.lastBot = tick_()
+                if type(firesignal) == "function" then
+                    pcall_(function() firesignal(best.MouseButton1Down, 0, 0) end)
+                    pcall_(function() firesignal(best.MouseButton1Up, 0, 0) end)
+                end
                 _clickGuiButton(best)
-                task_wait(0.3)
+                task_wait(0.35)
                 if best.Parent and shownB(best) then
-                    -- firesignal не закрыл телефон: реальный клик по центру кнопки
+                    -- сигналы не сработали: реальный клик, курсор вернём на место
                     local apos, asz
                     pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
                     if apos and asz then
                         local inset = 0
                         pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+                        local ox, oy = S.mx, S.my
                         LSM.lastBot = tick_()
                         mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
                         mouse1click()
                         task_wait(0.1)
+                        if ox and ox > 0 and oy and oy > 0 then
+                            LSM.lastBot = tick_()
+                            pcall_(function() mousemoveabs(mfloor(ox), mfloor(oy)) end)
+                        end
                     end
                 end
                 rprint("[Deal] accepted: " .. btnText(best))
