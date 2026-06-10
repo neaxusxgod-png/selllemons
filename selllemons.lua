@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.12 — минигейм не лочит камеру (клик по разу) | CHEER/EXIT по долям | стенд камера+лемон возврат ]] --
+-- [[ SELL LEMONS v18.13 — стенд первое лицо смотрит вниз | EXIT неск.высот | таймер локальный (видно всегда) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.12 ===")
+print("=== SELL LEMONS v18.13 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -1798,27 +1798,34 @@ local function runLocationsPass(firstRun)
             print("[Stand] " .. s.name .. (standEnabled[s.name] == false and "  OFF" or "  ON"))
         end
     end
-    -- v18: стенд = зеркало лемона. Отдаляем камеру (третье лицо, НЕ первое) один
-    -- раз за пасс, чтобы было видно стенды сверху.
-    LSM.zoom(-1)
+    -- v18.13: стенд в ПЕРВОМ ЛИЦЕ и смотрит ВНИЗ НА ПОЛ (как просил). В 3-м лице
+    -- lookAt мелькал и не держался ("экран мелькает, ничего не двигается"); в 1-м
+    -- лице держится - как у лемона. Зумим В первое лицо. Бонус: лемон после стенда
+    -- остаётся в 1-м лице (стенд больше не отдаляет) -> собирает дальше.
+    LSM.zoom(1)
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
         if standEnabled[s.name] ~= false then
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
-                -- v18.12: КАМЕРА НА СТЕНД прямо перед каждым нажатием E. Промпт
-                -- апгрейда срабатывает, только когда стенд в кадре -> lookAt должен
-                -- стоять В ТОТ ЖЕ МОМЕНТ, что и E (как лемон: lookAt -> сразу клик).
-                -- Точка обзора сверху-сзади над стендом, ~20/сек (не каждый кадр =
-                -- без фриза).
-                local eye = s.pos + Vec3(0, 11, 15)
-                local target = s.pos + Vec3(0, 2, 0)
+                task_wait(0.05)
+                -- камера от лица игрока ВНИЗ-ВПЕРЁД (на пол перед стендом), держим
+                -- lookAt прямо перед каждым E (как лемон: навёл -> сразу действие).
+                local eye, target
+                pcall_(function()
+                    local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        local p = h.Position
+                        eye = p + Vec3(0, 1.5, 0)
+                        target = p + Vec3(0, -7, 6)   -- вниз и чуть вперёд = на пол
+                    end
+                end)
                 _standIsTapping = true   -- автобай-воркер уступает на время спама
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
                     LSM.lastBot = tick_()
-                    pcall_(function() camera.lookAt(eye, target) end)   -- камера на стенд
+                    if eye then pcall_(function() camera.lookAt(eye, target) end) end
                     if _windowFocused() then keypress(STAND_KEY); keyrelease(STAND_KEY) end
                     task_wait(0.05)
                 end
@@ -1827,13 +1834,6 @@ local function runLocationsPass(firstRun)
             end
             task_wait(STAND_CYCLE_PAUSE)
         end
-    end
-    -- v18.12: стенд отдалял камеру -> верни лемону ПЕРВОЕ ЛИЦО, иначе он не
-    -- собирает (камера зумнута, lookAt-клик мажет). Сброс annAfk заставит лемон
-    -- заново войти в АФК-режим (зум в 1-е лицо + камера на фрукты).
-    if lemonFarmActive then
-        LSM.zoom(1)
-        LSM.annAfk = false
     end
     if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
     return "done"
@@ -2853,13 +2853,19 @@ local function pollInput()
     else
         statusTx3.Visible = false
     end
-    -- v18.4: таймер минигейма (читаем живой мировой лейбл, как кулдаун лозы)
+    -- v18.13: таймер минигейма. Лейбл стримится (виден только вблизи), поэтому
+    -- ведём ЛОКАЛЬНЫЙ отсчёт MG.miniEnd и синкаем когда лейбл доступен (как лоза).
     if MG.active then
         local cd = MG.timerSec()
-        if cd and cd > 0 then
-            statusTx4.Text = sformat("minigame  |  %d:%02d", mfloor(cd / 60), mfloor(cd % 60))
+        if cd and cd > 0 then MG.miniEnd = tick_() + cd end
+        local rem = MG.miniEnd and (MG.miniEnd - tick_()) or nil
+        if rem and rem > 0 then
+            statusTx4.Text = sformat("minigame  |  %d:%02d", mfloor(rem / 60), mfloor(rem % 60))
             statusTx4.Color = C3rgb(222, 210, 170)
             MG.miniNotif = false
+        elseif not MG.miniEnd then
+            statusTx4.Text = "minigame  |  --"   -- таймер ещё не синкнут (далеко от скамейки)
+            statusTx4.Color = C3rgb(222, 210, 170)
         else
             statusTx4.Text = "minigame  |  READY"
             statusTx4.Color = C3rgb(255, 214, 60)
@@ -3232,16 +3238,18 @@ _wrap("auto-minigame", function()
                 -- бесконечно. Раньше checkUp/resultUp ложно срабатывали на скрытых
                 -- лейблах -> скрипт 40с долбил курсор, нельзя было двигать камеру.
                 local justRaced = (tick_() - (MG.raceEndT or 0)) < 40
-                -- 2) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT (макс 4 раза)
-                if justRaced and (MG.exitTries or 0) < 4 and MG.resultUp() then
+                -- 2) КОНЕЦ ГОНКИ: видна кнопка EXIT (та же MinigameRace.Button, что
+                -- была CHEER) -> жмём по НЕСКОЛЬКИМ высотам (точную позицию не
+                -- знаем). Макс 6 попыток за гонку.
+                if justRaced and (MG.exitTries or 0) < 6 and (MG.findBtn("EXIT") or MG.resultUp()) then
                     LSM.standBusyT = tick_()
                     MG.exitTries = (MG.exitTries or 0) + 1
-                    MG.clickRatio(0.5, CFG.exitY)   -- EXIT по доле экрана
+                    MG.clickRatio(0.5, 0.80); MG.clickRatio(0.5, 0.86); MG.clickRatio(0.5, 0.91)
                     task_wait(0.6)
                     return
                 end
-                -- 3) ЧЕК на экране -> клик (макс 4 раза за гонку)
-                if justRaced and (MG.checkTries or 0) < 4 and MG.checkUp() then
+                -- 3) ЧЕК на экране -> клик (макс 6 раз за гонку)
+                if justRaced and (MG.checkTries or 0) < 6 and MG.checkUp() then
                     LSM.standBusyT = tick_()
                     MG.checkTries = (MG.checkTries or 0) + 1
                     MG.clickCheck()
@@ -3255,9 +3263,12 @@ _wrap("auto-minigame", function()
                     task_wait(0.4)
                     return
                 end
-                -- 5) КУЛДАУН? ждём (таймер в статусе). cd<=0 -> ниже = СТАРТ заново
+                -- 5) КУЛДАУН? ждём. Таймер-лейбл стримится (виден только вблизи),
+                -- поэтому ведём ЛОКАЛЬНЫЙ отсчёт и синкаем когда лейбл доступен.
                 local cd = MG.timerSec()
-                if cd and cd > 0 then
+                if cd and cd > 0 then MG.miniEnd = tick_() + cd end   -- синк у скамейки
+                local localCd = MG.miniEnd and (MG.miniEnd - tick_()) or nil
+                if (cd and cd > 0) or (localCd and localCd > 0) then
                     task_wait(0.5)
                     return
                 end
