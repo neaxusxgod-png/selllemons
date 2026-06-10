@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v13.1 — таймер тикает ВСЕГДА (синк у замка, отсчёт свой) ]] --
+-- [[ SELL LEMONS v13.2 — Auto Deal: автопринятие сделок-телефона ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -80,6 +80,7 @@ local autoBuyActive    = false
 local lemonFarmActive  = false
 local cashFarmActive   = false   -- v5.18: ya NO arranca solo; se activa con tecla 4 o GUI
 local autoStandActive  = false
+local autoDealActive   = true    -- v13.2: автопринятие сделок (телефон с Deal.)
 local _standIsTapping  = false   -- Gate: true while AutoStand is in E-tap phase
 
 local buyBlacklist    = {}
@@ -299,6 +300,10 @@ if homesick then
     end)
 
     pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
+    UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
+        autoDealActive = val
+    end)
+
     UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
         if val then
             CFG.vineGo = true    -- ВКЛ: запомнить место и ТП к лозе
@@ -2472,6 +2477,69 @@ RunService.RenderStepped:Connect(function()
     if not ScriptActive then return end
     local ok, err = pcall_(pollInput)
     if not ok then reportErr("ui-input", err) end
+end)
+
+-- ==================== AUTO DEAL (v13.2: телефон со сделками) ====================
+-- Периодически вылазит попап-телефон с кнопками Deal./Go higher./Nvm.
+-- Верхняя (Deal.) просто даёт деньги - жмём её автоматически: сначала
+-- firesignal, если попап не закрылся - реальный клик по центру кнопки.
+_wrap("auto-deal", function()
+    local function shown(o)
+        local cur = o
+        while cur and cur:IsA("GuiObject") do
+            if cur.Visible == false then return false end
+            cur = cur.Parent
+        end
+        if cur and cur.ClassName == "ScreenGui" then
+            local en = true
+            pcall_(function() en = cur.Enabled end)
+            return en ~= false
+        end
+        return cur ~= nil
+    end
+    while ScriptActive do
+        if autoDealActive then
+            pcall_(function()
+                local btn = LSM.dealBtn
+                if not (btn and btn.Parent) then
+                    btn = nil
+                    if (tick_() - (LSM.dealScanT or 0)) > 2 then
+                        LSM.dealScanT = tick_()
+                        local pg = player:FindFirstChildOfClass("PlayerGui")
+                        if pg then
+                            for _, d in ipairs_(pg:GetDescendants()) do
+                                if d:IsA("TextButton") then
+                                    local tt = tostring_(d.Text)
+                                    if tt == "Deal." or tt:lower():match("^%s*deal%.?%s*$") then
+                                        btn = d
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        LSM.dealBtn = btn
+                    end
+                end
+                if btn and btn.Parent and shown(btn) then
+                    LSM.lastBot = tick_()
+                    _clickGuiButton(btn)
+                    task_wait(0.3)
+                    if btn.Parent and shown(btn) then
+                        local apos = btn.AbsolutePosition
+                        local asz  = btn.AbsoluteSize
+                        local inset = 0
+                        pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+                        LSM.lastBot = tick_()
+                        mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
+                        mouse1click()
+                    end
+                    rprint("[Deal] accepted")
+                    task_wait(1)
+                end
+            end)
+        end
+        task_wait(0.5)
+    end
 end)
 
 -- ==================== AUTO STAND standalone loop ====================
