@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.6 — лоза ищется по всей карте | lookAt не глотается | зум глубже ]] --
+-- [[ SELL LEMONS v12.7 — БЕЗ зума (движок перетирал lookAt в 1-м лице) | лоза: точные корды + возврат тогглом ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -301,10 +301,9 @@ if homesick then
     pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
     UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
         if val then
-            CFG.vineGo = true   -- сам ТП делает input-цикл (там вся область видимости)
-            task.delay(0.1, function()
-                pcall_(function() UIRef.t.CashVine:SetValue(false) end)
-            end)
+            CFG.vineGo = true    -- ВКЛ: запомнить место и ТП к лозе
+        else
+            CFG.vineBack = true  -- ВЫКЛ: вернуться, где был
         end
     end)
 
@@ -1958,7 +1957,6 @@ function LSM.returnHome()
             end
         end)
     end
-    LSM.zoom(-1)
     if a and LSM.anchorCam then
         pcall_(function()
             camera.lookAt(a + LSM.anchorCam, a)
@@ -2118,8 +2116,10 @@ _wrap("lemon-farm", function()
                         LSM.anchorCam = camera.Position - h2.Position
                     end
                 end)
-                print("[Lemon] AFK -> zoom to 1st person + farm")
-                LSM.zoom(1)
+                -- v12.7: БЕЗ зума! В настоящем 1-м лице Roblox сам держит
+                -- камеру и перетирает наш lookAt - голова не поднималась.
+                -- Оригинальный метод: камера ставится lookAt-ом на каждый фрукт.
+                print("[Lemon] AFK -> farm")
             else
                 print("[Lemon] input detected -> back to your spot")
                 LSM.returnHome()
@@ -2274,42 +2274,21 @@ local function pollInput()
         end
     end
 
-    -- Cash Vine: запрос ТП из меню (CFG.vineGo ставит коллбэк тоггла)
+    -- Cash Vine (v12.7): ВКЛ = запомнить место и ТП к лозе, ВЫКЛ = вернуться.
+    -- Точные корды дал оператор (Sewer общий для всех игроков, не тайкун).
     if CFG.vineGo then
         CFG.vineGo = false
-        local vp7 = LSM.vinePos
-        if not vp7 then
-            -- v12.6: Sewer может быть вложен глубже - ищем CashVine по всей
-            -- карте (один раз, потом кэш)
-            pcall_(function()
-                for _, d in ipairs_(Workspace:GetDescendants()) do
-                    if d.Name == "CashVine" and (d:IsA("Folder") or d:IsA("Model")) then
-                        local hit
-                        local door = d:FindFirstChild("VineDoor")
-                        if door and door:IsA("BasePart") then hit = door.Position end
-                        if not hit then
-                            local m = d:FindFirstChild("CashVine")
-                            if m and m ~= d then hit = _modelPivotPos(m) end
-                        end
-                        if not hit and d:IsA("Model") then hit = _modelPivotPos(d) end
-                        if hit then
-                            vp7 = hit
-                            break
-                        end
-                    end
-                end
-            end)
-            if vp7 then LSM.vinePos = vp7 end
-        end
-        if vp7 then
-            pcall_(function()
-                local chr = player.Character
-                local h = chr and chr:FindFirstChild("HumanoidRootPart")
-                if h then
-                    h.CFrame = CF(vp7.X, vp7.Y + 3, vp7.Z)
-                    h.AssemblyLinearVelocity = Vec3(0, 0, 0)
-                end
-            end)
+        pcall_(function()
+            local chr = player.Character
+            local h = chr and chr:FindFirstChild("HumanoidRootPart")
+            if h then
+                CFG.vineRet = h.Position
+                h.CFrame = CF(39.7, -41.0, -77.5)
+                h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+            end
+        end)
+        -- таймер НЕ перезаписываем, если уже тикает (зашёл просто проверить)
+        if not CFG.vineT or (tick_() - CFG.vineT) >= CFG.vineCd then
             CFG.vineT = tick_()
             CFG.vineNotif = false
             pcall_(function()
@@ -2317,9 +2296,22 @@ local function pollInput()
                     writefile("selllemons_vine.txt", tostring_(CFG.vineT))
                 end
             end)
-            rprint("[Vine] teleported - 4h timer started")
-        else
-            rprint("[Vine] not found (Workspace.Sewer.CashVine)")
+        end
+        rprint("[Vine] at the vine - toggle OFF to return")
+    end
+    if CFG.vineBack then
+        CFG.vineBack = false
+        if CFG.vineRet then
+            pcall_(function()
+                local chr = player.Character
+                local h = chr and chr:FindFirstChild("HumanoidRootPart")
+                if h then
+                    h.CFrame = CF(CFG.vineRet.X, CFG.vineRet.Y + 1, CFG.vineRet.Z)
+                    h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+                end
+            end)
+            CFG.vineRet = nil
+            rprint("[Vine] returned")
         end
     end
 
