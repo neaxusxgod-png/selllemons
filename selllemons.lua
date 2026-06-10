@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.6 — PICK клик выше (3 ряда) | минигеймы только с promptом (без Buttons) ]] --
+-- [[ SELL LEMONS v18.7 — состояние тогглов/чекбоксов сохраняется и подтягивается (своё хранилище) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18 ===")
+print("=== SELL LEMONS v18.7 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -245,6 +245,7 @@ local function stopAll()
     autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive = false, false, false, false
     resetBuyBlacklist()
     syncToUI()
+    pcall_(function() if S.saveState then S.saveState() end end)
     print("[Hub] Everything stopped!")
 end
 
@@ -258,6 +259,7 @@ local function toggleFeature(slot)
     elseif slot == 5 then stopAll(); return
     else return end
     syncToUI()
+    pcall_(function() if S.saveState then S.saveState() end end)
     print("[Hub] toggle slot " .. slot)
 end
 
@@ -266,6 +268,24 @@ end
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }   -- v17: Auto Minigame (всё в таблице = 1 регистр)
+-- v18.7: СВОЁ сохранение состояния. homesick грузит config из одного файла, а
+-- его setItemValue (клик по тогглу) НЕ пишет вообще -> состояние не сохранялось.
+-- Пишем сами в selllemons_state.json на каждое изменение, читаем при загрузке.
+-- Всё в полях S/UIRef -> регистры не тратим. S.loaded гасит запись во время
+-- начальной загрузки (чтобы коллбэки homesick не затёрли наш файл).
+S.loaded = false
+S.saveState = function()
+    if not S.loaded then return end
+    pcall_(function()
+        if type(writefile) ~= "function" then return end
+        local hs = game:GetService("HttpService")
+        writefile("selllemons_state.json", hs:JSONEncode({
+            ab = autoBuyActive, lf = lemonFarmActive, as = autoStandActive,
+            cf = cashFarmActive, ad = autoDealActive, mg = MG.active,
+            st = standEnabled, mn = MG.enabled,
+        }))
+    end)
+end
 -- v18.2: список минигеймов = папки в Purchases.Minigames (для чекбоксов-селектора)
 MG.list = function()
     local out = {}
@@ -391,7 +411,9 @@ end
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
     local window = homesick.createWindow("Sell Lemons", 480, 420)
-    pcall_(function() window:autoloadConfig("selllemons_config") end)
+    -- v18.7: грузим из "config" - тот же файл, куда homesick пишет позицию окна
+    -- при перетаскивании (раньше было "selllemons_config" - НЕ совпадало с записью).
+    pcall_(function() window:autoloadConfig("config") end)
     pcall_(function() window:autoloadTheme("theme") end)
     UIRef.win = window
 
@@ -400,21 +422,25 @@ if homesick then
 
     UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
         autoBuyActive = val
+        S.saveState()
         print("[Hub] toggle AutoBuy = " .. tostring_(val))
     end):addKeybind("1", "Toggle", true, function() end)
 
     UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
         lemonFarmActive = val
+        S.saveState()
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
     UIRef.t.AutoStand = left:addToggle("autoStand", "Auto Stand", false, function(val)
         autoStandActive = val
+        S.saveState()
         print("[Hub] toggle AutoStand = " .. tostring_(val))
     end):addKeybind("3", "Toggle", true, function() end)
 
     UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", true, function(val)
         cashFarmActive = val
+        S.saveState()
         print("[Hub] toggle CashFarm = " .. tostring_(val))
     end):addKeybind("4", "Toggle", true, function() end)
 
@@ -423,10 +449,12 @@ if homesick then
     pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
+        S.saveState()
     end)
 
     UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
         MG.active = val
+        S.saveState()
         print("[Hub] toggle AutoMinigame = " .. tostring_(val))
     end)
 
@@ -454,8 +482,10 @@ if homesick then
         end)
     end)
 
-    -- v18.2: вкладка "Auto" - выбор стендов И минигеймов (чекбоксы). Состояние
-    -- сохраняется автоконфигом homesick. Имена из живого тайкуна.
+    -- v18.2: вкладка "Auto" - выбор стендов И минигеймов (чекбоксы). Хэндлы
+    -- храним в UIRef.standCb/miniCb, чтобы при загрузке отразить сохранённое.
+    UIRef.standCb = {}
+    UIRef.miniCb = {}
     pcall_(function()
         local autoTab = window:addTab("Auto")
         local sec = autoTab:addSection("Stands", "Left")
@@ -463,9 +493,10 @@ if homesick then
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
         if #listed == 0 then listed = STAND_NAMES end
         for _, nm in ipairs_(listed) do
-            if standEnabled[nm] == nil then standEnabled[nm] = true end   -- не затираем коллбэк автоконфига
-            sec:addCheckbox("stand_" .. nm, nm, true, function(val)
+            if standEnabled[nm] == nil then standEnabled[nm] = true end
+            UIRef.standCb[nm] = sec:addCheckbox("stand_" .. nm, nm, true, function(val)
                 standEnabled[nm] = val
+                S.saveState()
             end)
         end
         -- минигеймы: чекбокс на каждый (Auto Minigame играет только включённые)
@@ -474,8 +505,9 @@ if homesick then
             local mgSec = autoTab:addSection("Minigames", "Right")
             for _, nm in ipairs_(mgList) do
                 if MG.enabled[nm] == nil then MG.enabled[nm] = true end
-                mgSec:addCheckbox("mini_" .. nm, nm, true, function(val)
+                UIRef.miniCb[nm] = mgSec:addCheckbox("mini_" .. nm, nm, true, function(val)
                     MG.enabled[nm] = val
+                    S.saveState()
                 end)
             end
         end
@@ -483,8 +515,36 @@ if homesick then
 
     window.visible = true
     window:render()
+
+    -- v18.7: ВОССТАНОВЛЕНИЕ сохранённого состояния (после render, поверх того, что
+    -- подтянул homesick). Применяем к булевым, таблицам и отражаем в виджетах.
+    pcall_(function()
+        if type(readfile) ~= "function" then return end
+        local raw = readfile("selllemons_state.json")
+        if not raw or raw == "" then return end
+        local d = game:GetService("HttpService"):JSONDecode(raw)
+        if type(d) ~= "table" then return end
+        autoBuyActive   = d.ab == true
+        lemonFarmActive = d.lf == true
+        autoStandActive = d.as == true
+        cashFarmActive  = d.cf ~= false   -- Cash Farm по умолчанию ВКЛ
+        autoDealActive  = d.ad ~= false   -- Auto Deal по умолчанию ВКЛ
+        MG.active       = d.mg == true
+        if type(d.st) == "table" then for k, v in pairs_(d.st) do standEnabled[k] = v end end
+        if type(d.mn) == "table" then for k, v in pairs_(d.mn) do MG.enabled[k] = v end end
+        pcall_(function() UIRef.t.AutoBuy:SetValue(autoBuyActive) end)
+        pcall_(function() UIRef.t.LemonFarm:SetValue(lemonFarmActive) end)
+        pcall_(function() UIRef.t.AutoStand:SetValue(autoStandActive) end)
+        pcall_(function() UIRef.t.CashFarm:SetValue(cashFarmActive) end)
+        pcall_(function() UIRef.t.AutoDeal:SetValue(autoDealActive) end)
+        pcall_(function() UIRef.t.AutoMini:SetValue(MG.active) end)
+        for k, cb in pairs_(UIRef.standCb) do pcall_(function() cb:SetValue(standEnabled[k] ~= false) end) end
+        for k, cb in pairs_(UIRef.miniCb) do pcall_(function() cb:SetValue(MG.enabled[k] ~= false) end) end
+    end)
     print("[Hub] homesick UI loaded - keys 1-5 via keybinds")
 end
+-- v18.7.1: вне if homesick - чтобы сохранение работало и в фоллбэк-режиме (без UI)
+S.loaded = true   -- с этого момента изменения пишутся в файл
 
 -- ==================== AUTOBUY ====================
 local function normalizeColor(c)
