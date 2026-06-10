@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.11 — клики без GuiInset (CHEER/EXIT ровно по кнопке) | клик по чеку умный ]] --
+-- [[ SELL LEMONS v18.12 — минигейм не лочит камеру (клик по разу) | CHEER/EXIT по долям | стенд камера+лемон возврат ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -155,7 +155,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.9 ===")
+print("=== SELL LEMONS v18.12 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -177,6 +177,8 @@ local CFG = {
     standRest = 60,     -- АвтоСтенд проходится раз в минуту, когда лимонка включена
     vineCd    = 4 * 3600,   -- кулдаун Cash Vine (4 часа)
     buyStuck  = 6,      -- сек без новых покупок -> автобай застрял, лимонка берёт ход
+    cheerY    = 0.85,   -- v18.12: высота клика CHEER (доля экрана; меньше = выше)
+    exitY     = 0.76,   -- высота клика EXIT на экране результата
 }
 
 local S = {
@@ -1805,25 +1807,33 @@ local function runLocationsPass(firstRun)
         if standEnabled[s.name] ~= false then
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
-                -- v18.8: камера сверху, но БЕЗ фриза. Раньше lookAt каждый кадр
-                -- (v18.5) ломал игру. Теперь раз в 0.05с (≈20/сек) - вид держится
-                -- достаточно, а игра не лагает. E жмём в том же цикле.
-                local eye = s.pos + Vec3(0, 32, 8)
+                -- v18.12: КАМЕРА НА СТЕНД прямо перед каждым нажатием E. Промпт
+                -- апгрейда срабатывает, только когда стенд в кадре -> lookAt должен
+                -- стоять В ТОТ ЖЕ МОМЕНТ, что и E (как лемон: lookAt -> сразу клик).
+                -- Точка обзора сверху-сзади над стендом, ~20/сек (не каждый кадр =
+                -- без фриза).
+                local eye = s.pos + Vec3(0, 11, 15)
+                local target = s.pos + Vec3(0, 2, 0)
                 _standIsTapping = true   -- автобай-воркер уступает на время спама
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
                     LSM.lastBot = tick_()
-                    pcall_(function() camera.lookAt(eye, s.pos) end)
-                    if _windowFocused() then
-                        keypress(STAND_KEY); task_wait(0.02); keyrelease(STAND_KEY)
-                    end
-                    task_wait(0.03)
+                    pcall_(function() camera.lookAt(eye, target) end)   -- камера на стенд
+                    if _windowFocused() then keypress(STAND_KEY); keyrelease(STAND_KEY) end
+                    task_wait(0.05)
                 end
                 _standIsTapping = false
                 tapped = tapped + 1
             end
             task_wait(STAND_CYCLE_PAUSE)
         end
+    end
+    -- v18.12: стенд отдалял камеру -> верни лемону ПЕРВОЕ ЛИЦО, иначе он не
+    -- собирает (камера зумнута, lookAt-клик мажет). Сброс annAfk заставит лемон
+    -- заново войти в АФК-режим (зум в 1-е лицо + камера на фрукты).
+    if lemonFarmActive then
+        LSM.zoom(1)
+        LSM.annAfk = false
     end
     if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
     return "done"
@@ -2474,15 +2484,19 @@ _wrap("lemon-farm", function()
         if lemonFarmActive and LSM.annAfk ~= afkNow then
             LSM.annAfk = afkNow
             if afkNow then
-                -- запомнить, где стоял игрок и как смотрела камера (для возврата)
-                pcall_(function()
-                    local chr2 = player.Character
-                    local h2 = chr2 and chr2:FindFirstChild("HumanoidRootPart")
-                    if h2 then
-                        LSM.anchor = h2.Position
-                        LSM.anchorCam = camera.Position - h2.Position
-                    end
-                end)
+                -- запомнить место/камеру для возврата. v18.12: ТОЛЬКО если якоря
+                -- ещё нет - иначе стенд-пасс (сброс annAfk) перезаписал бы якорь
+                -- позицией стенда, и returnHome увёл бы игрока не туда.
+                if not LSM.anchor then
+                    pcall_(function()
+                        local chr2 = player.Character
+                        local h2 = chr2 and chr2:FindFirstChild("HumanoidRootPart")
+                        if h2 then
+                            LSM.anchor = h2.Position
+                            LSM.anchorCam = camera.Position - h2.Position
+                        end
+                    end)
+                end
                 -- v13.5: зум возвращён - так было в золотой версии
                 print("[Lemon] AFK -> zoom + farm")
                 pcall_(function() camera = Workspace.CurrentCamera end)   -- v14: камера могла пересоздаться при респавне
@@ -3092,16 +3106,29 @@ function MG.clickSlots()
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
+-- v18.12: клик по доле экрана (для CHEER/EXIT - AbsolutePosition давал не ту точку)
+function MG.clickRatio(fx, fy)
+    local vw, vh = 1920, 1080
+    pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
+    local ox, oy = S.mx, S.my
+    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+    LSM.lastBot = tick_()
+    pcall_(function()
+        mousemoveabs(mfloor(vw * fx), mfloor(vh * fy)); mouse1press(); mouse1release()
+    end)
+    pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
+end
 -- v18.5: НЕПРЕРЫВНЫЙ супербыстрый спам CHEER. Встаём на кнопку ОДИН раз, дальше
 -- жмём мышь каждый кадр без движений курсора и без пауз - максимально часто.
 -- Каждые 16 кликов проверяем, что кнопка ещё CHEER (не "exit"/исчезла = гонка всё).
 function MG.spamCheer(btn)
-    local ap, az
-    pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
-    if not ap or not az then return end
-    if ap.X <= 1 and ap.Y <= 1 then return end
-    -- v18.11: БЕЗ GuiInset (уводил курсор ниже кнопки -> CHEER криво)
-    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2)
+    -- v18.12: AbsolutePosition CHEER-кнопки давал клик СЛИШКОМ НИЗКО (система
+    -- координат не та; для PICK тоже пришлось перейти на доли экрана). Кликаем
+    -- по доле экрана: центр по X, CFG.cheerY по высоте. btn нужен только чтобы
+    -- понять, что гонка ещё идёт.
+    local vw, vh = 1920, 1080
+    pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
+    local cx, cy = mfloor(vw * 0.5), mfloor(vh * CFG.cheerY)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     pcall_(function() mousemoveabs(cx, cy) end)   -- встаём на CHEER один раз
@@ -3195,27 +3222,30 @@ _wrap("auto-minigame", function()
                 local cheer = MG.findBtn("CHEER", true)
                 if cheer then
                     LSM.standBusyT = tick_()
+                    MG.exitTries = 0   -- новая гонка -> сбрасываем счётчики попыток
+                    MG.checkTries = 0
                     MG.spamCheer(cheer)
-                    MG.raceEndT = tick_()   -- v18.10: гонка только что закончилась
+                    MG.raceEndT = tick_()   -- гонка только что закончилась
                     return
                 end
-                -- EXIT/ЧЕК обрабатываем ТОЛЬКО ~25с после гонки. Иначе checkUp/
-                -- resultUp ложно срабатывали на скрытых лейблах (видимость в Матче
-                -- ненадёжна) и цикл застревал, не доходя до входа в игру.
+                -- v18.12: EXIT и чек жмём ПО НЕСКОЛЬКУ ПОПЫТОК ЗА ГОНКУ, а не
+                -- бесконечно. Раньше checkUp/resultUp ложно срабатывали на скрытых
+                -- лейблах -> скрипт 40с долбил курсор, нельзя было двигать камеру.
                 local justRaced = (tick_() - (MG.raceEndT or 0)) < 40
-                -- 2) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT
-                if justRaced and MG.resultUp() then
+                -- 2) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT (макс 4 раза)
+                if justRaced and (MG.exitTries or 0) < 4 and MG.resultUp() then
                     LSM.standBusyT = tick_()
-                    local exitb = MG.findBtn("EXIT", true)
-                    if exitb then MG.click(exitb) end
-                    task_wait(0.5)
+                    MG.exitTries = (MG.exitTries or 0) + 1
+                    MG.clickRatio(0.5, CFG.exitY)   -- EXIT по доле экрана
+                    task_wait(0.6)
                     return
                 end
-                -- 3) ЧЕК на экране -> клик по чеку (забрать деньги)
-                if justRaced and MG.checkUp() then
+                -- 3) ЧЕК на экране -> клик (макс 4 раза за гонку)
+                if justRaced and (MG.checkTries or 0) < 4 and MG.checkUp() then
                     LSM.standBusyT = tick_()
+                    MG.checkTries = (MG.checkTries or 0) + 1
                     MG.clickCheck()
-                    task_wait(0.5)
+                    task_wait(0.6)
                     return
                 end
                 -- 4) ВЫБОР: PICK (билборды) -> клик по экранным долям
