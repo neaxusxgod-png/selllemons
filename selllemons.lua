@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v14.1 — Auto Deal: невидимая цепочка сигналов + возврат курсора при фоллбэке ]] --
+-- [[ SELL LEMONS v14.2 — Auto Deal: невидимый клик (прыжок+нажатие+возврат в один проход) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2610,31 +2610,36 @@ _wrap("auto-deal", function()
                     end
                 end
                 if not best or isReject(btnText(best)) then return end
-                -- v14.1: НЕВИДИМОЕ нажатие: полная цепочка сигналов кнопки
-                -- (игры часто слушают Down/Up, а не Click)
-                LSM.lastBot = tick_()
-                if type(firesignal) == "function" then
-                    pcall_(function() firesignal(best.MouseButton1Down, 0, 0) end)
-                    pcall_(function() firesignal(best.MouseButton1Up, 0, 0) end)
-                end
-                _clickGuiButton(best)
-                task_wait(0.35)
-                if best.Parent and shownB(best) then
-                    -- сигналы не сработали: реальный клик, курсор вернём на место
-                    local apos, asz
-                    pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
-                    if apos and asz then
-                        local inset = 0
-                        pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
-                        local ox, oy = S.mx, S.my
+                -- v14.2: firesignal/хуки/getgc в Matcha недоступны -> принять
+                -- сделку можно ТОЛЬКО реальным кликом. Делаем его НЕВИДИМЫМ:
+                -- запоминаем курсор, прыгаем на кнопку, нажал-отпустил, сразу
+                -- возвращаем курсор - одним проходом без пауз, кадр не успевает
+                -- отрисовать промежуточное положение.
+                local apos, asz
+                pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
+                if apos and asz then
+                    local inset = 0
+                    pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+                    local bx = mfloor(apos.X + asz.X / 2)
+                    local by = mfloor(apos.Y + asz.Y / 2 + inset)
+                    local ox, oy = S.mx, S.my
+                    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+                    LSM.lastBot = tick_()
+                    pcall_(function()
+                        mousemoveabs(bx, by)
+                        mouse1press()
+                        mouse1release()
+                        if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
+                    end)
+                    -- не зарегалось с первого раза -> вторая попытка с микропаузой
+                    task_wait(0.12)
+                    if best.Parent and shownB(best) then
                         LSM.lastBot = tick_()
-                        mousemoveabs(mfloor(apos.X + asz.X / 2), mfloor(apos.Y + asz.Y / 2 + inset))
-                        mouse1click()
-                        task_wait(0.1)
-                        if ox and ox > 0 and oy and oy > 0 then
-                            LSM.lastBot = tick_()
-                            pcall_(function() mousemoveabs(mfloor(ox), mfloor(oy)) end)
-                        end
+                        pcall_(function()
+                            mousemoveabs(bx, by)
+                            mouse1click()
+                            if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
+                        end)
                     end
                 end
                 rprint("[Deal] accepted: " .. btnText(best))
