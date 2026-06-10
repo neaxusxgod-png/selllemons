@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.2 — PICK клик по экранным долям | селектор минигеймов | окно больше ]] --
+-- [[ SELL LEMONS v18.3 — автостенд камера ПРЯМО СВЕРХУ (держит весь спам) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1701,18 +1701,19 @@ local function runLocationsPass(firstRun)
         if standEnabled[s.name] ~= false then
             if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
             if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
-                -- v18: НАМЕРЕННО смотрим ВНИЗ на стенд (зеркально лемону - тот вверх).
-                -- Камера сверху-сзади, взгляд на стенд. Повторяем lookAt в цикле,
-                -- иначе дефолтная камера 3-го лица сразу снесёт ракурс.
-                local eye = s.pos + Vec3(0, 14, 10)
-                for _ = 1, 10 do
-                    if not autoStandActive then break end
+                -- v18.3: камера ПРЯМО СВЕРХУ (вид сверху-вниз, как ты просил).
+                -- Держим lookAt ВЕСЬ E-спам (иначе дефолтная камера снесёт за кадр)
+                -- + жмём E в том же цикле. eye высоко над стендом, лёгкий наклон.
+                local eye = s.pos + Vec3(0, 28, 6)
+                _standIsTapping = true   -- автобай-воркер уступает на время спама
+                local t0 = tick_()
+                while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
+                    if not _windowFocused() then break end
                     LSM.lastBot = tick_()
-                    pcall_(function() camera.lookAt(eye, s.pos) end)
-                    task_wait(0.03)
+                    pcall_(function() camera.lookAt(eye, s.pos) end)   -- держим вид сверху
+                    keypress(STAND_KEY); task_wait(0.02); keyrelease(STAND_KEY); task_wait(0.02)
                 end
-                task_wait(STAND_TP_SETTLE)
-                _spamKeyFor(STAND_KEY, STAND_E_SPAM_DURATION, STAND_E_SPAM_INTERVAL)
+                _standIsTapping = false
                 tapped = tapped + 1
             end
             task_wait(STAND_CYCLE_PAUSE)
