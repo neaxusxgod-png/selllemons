@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v15 — выбор стендов (вкладка Stands) + ТП по Locations (свой тайкун, любой игрок) ]] --
+-- [[ SELL LEMONS v16 — фикс пинг-понга Buy+Lemon (по прогрессу) | микро-кэш скана (меньше лага) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -176,6 +176,7 @@ local CFG = {
     zoomStep  = 1,      -- если зум не в ту сторону - поставить -1
     standRest = 60,     -- АвтоСтенд проходится раз в минуту, когда лимонка включена
     vineCd    = 4 * 3600,   -- кулдаун Cash Vine (4 часа)
+    buyStuck  = 6,      -- сек без новых покупок -> автобай застрял, лимонка берёт ход
 }
 
 local S = {
@@ -444,10 +445,21 @@ end
 
 buildButtonsCache()
 
+local _bScan = { t = 0, list = nil }
 local function getButtonsRealTime()
     if not buttonsCacheReady then
         buildButtonsCache()
         if not buttonsCacheReady then return {} end
+    end
+
+    -- v16: микро-кэш 0.12с. НЕ меняет ЧТО сканируем (scan-логика священна) -
+    -- только гасит лишние полные GetDescendants, когда worker + coordinator +
+    -- allButtonsDead + anyGivenUp + _anyLiveButtons зовут скан пачкой за тик.
+    -- Это главный источник лага при автобае. Вызыватели читают список только
+    -- на чтение и фильтруют по btn.Parent, так что 0.12с-давность безопасна.
+    local now = tick_()
+    if _bScan.list and (now - _bScan.t) < 0.12 then
+        return _bScan.list
     end
 
     -- ORIGINAL (v5.17): junta TODOS los "Button" BasePart bajo cada model,
@@ -472,6 +484,8 @@ local function getButtonsRealTime()
             end
         end
     end
+    _bScan.list = temp
+    _bScan.t = now
     return temp
 end
 
@@ -1114,7 +1128,6 @@ local function _anyLiveButtons()
 end
 
 -- ==================== AUTO STAND - MANAGE+TP HYBRID MODE ====================
-local STAND_MODE = "manage"
 local STAND_MANAGE_PATH = {"Manage", "ManageMenu", "Body", "Frame", "Manage"}
 local STAND_MANAGE_BLANK_PREFIX = "Blank"
 local STAND_MANAGE_CLICK_DELAY  = 0.05
@@ -2237,13 +2250,20 @@ _wrap("lemon-farm", function()
             print(buyBusy and "[Lemon] pause: autobuy buying" or "[Lemon] autobuy done -> resume")
         end
         local afkNow = (tick_() - (S.lastUser or 0)) >= CFG.afkDelay
-        -- v13.9: тайм-слоты. Автобай держит персонажа максимум 8с подряд;
-        -- потом лимонка забирает его на ОДИН цикл и возвращает. Никто не голодает.
+        -- v16: лимонка забирает ход ТОЛЬКО когда автобай реально ЗАСТРЯЛ
+        -- (totalBought не растёт CFG.buyStuck сек = нет денег / всё серое), а
+        -- НЕ по таймеру. Пока автобай покупает (счётчик растёт) - лимонка ждёт,
+        -- чтобы он докупил всю пачку. Это убирает пинг-понг buy<->lemon.
         if buyBusy and afkNow then
-            if not LSM.buyHoldT then LSM.buyHoldT = tick_() end
-            if (tick_() - LSM.buyHoldT) > 5 then LSM.lemonSlot = true end
+            if totalBought ~= LSM.lastBoughtN then
+                LSM.lastBoughtN = totalBought
+                LSM.buyProgressT = tick_()   -- автобай купил -> прогресс есть
+            end
+            if not LSM.buyProgressT then LSM.buyProgressT = tick_() end
+            if (tick_() - LSM.buyProgressT) > CFG.buyStuck then LSM.lemonSlot = true end
         else
-            LSM.buyHoldT = nil
+            LSM.buyProgressT = nil
+            LSM.lastBoughtN = totalBought
         end
         if not (lemonFarmActive and autoBuyActive) then LSM.lemonSlot = false end
         if lemonFarmActive and LSM.annAfk ~= afkNow then
@@ -2334,10 +2354,12 @@ _wrap("lemon-farm", function()
                 end
             end
 
-            -- v13.9: слот истрачен - отдаём персонажа автобаю
+            -- v16: слот истрачен - отдаём персонажа автобаю и даём ему свежее
+            -- окно (сбрасываем таймер застревания), чтобы он снова докупал пачку
             if LSM.lemonSlot then
                 LSM.lemonSlot = false
-                LSM.buyHoldT = nil
+                LSM.buyProgressT = tick_()
+                LSM.lastBoughtN = totalBought
             end
             task_wait(0.1)
         else
