@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.10 — фикс: EXIT/чек только после гонки (не застревает на входе) ]] --
+-- [[ SELL LEMONS v18.11 — клики без GuiInset (CHEER/EXIT ровно по кнопке) | клик по чеку умный ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -3035,13 +3035,13 @@ function MG.click(btn)
     pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
     if not ap or not az then return end
     if ap.X <= 1 and ap.Y <= 1 then return end   -- ещё не отрисована -> не кликаем в угол
-    local inset = 0
-    pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+    -- v18.11: БЕЗ GuiInset. AbsolutePosition уже в экранных координатах; +inset
+    -- уводил клик на ~36px НИЖЕ кнопки (CHEER/EXIT мимо, "криво").
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     LSM.lastBot = tick_()
     pcall_(function()
-        mousemoveabs(mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2 + inset))
+        mousemoveabs(mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2))
         mouse1press(); mouse1release()
         if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
     end)
@@ -3100,9 +3100,8 @@ function MG.spamCheer(btn)
     pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
     if not ap or not az then return end
     if ap.X <= 1 and ap.Y <= 1 then return end
-    local inset = 0
-    pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
-    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2 + inset)
+    -- v18.11: БЕЗ GuiInset (уводил курсор ниже кнопки -> CHEER криво)
+    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     pcall_(function() mousemoveabs(cx, cy) end)   -- встаём на CHEER один раз
@@ -3147,15 +3146,44 @@ function MG.checkUp()
     local chk = popup and popup:FindFirstChild("Check")
     return (chk and MG.shown(chk)) or false
 end
-function MG.clickCenter()
+-- v18.11: клик по чеку. Сначала реальная позиция самого большого видимого
+-- элемента Popup.Check (на нём ловится клик), потом центр экрана - страховка.
+-- По 2 клика каждый, чтобы точно зарегалось.
+function MG.clickCheck()
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
-    LSM.lastBot = tick_()
+    -- 1) точка на самом чеке
     pcall_(function()
-        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5))
-        mouse1press(); mouse1release()
+        local pg = player:FindFirstChildOfClass("PlayerGui")
+        local popup = pg and pg:FindFirstChild("Popup")
+        local chk = popup and popup:FindFirstChild("Check")
+        if not chk then return end
+        local bx, by, area
+        for _, d in ipairs_(chk:GetDescendants()) do
+            local cn = tostring_(d.ClassName)
+            if cn == "Frame" or cn == "ImageButton" or cn == "ImageLabel" or cn == "TextButton" then
+                local ap = d.AbsolutePosition; local az = d.AbsoluteSize
+                if ap and az and az.X > 50 and az.Y > 50 and (ap.X > 1 or ap.Y > 1) then
+                    local a = az.X * az.Y
+                    if not area or a > area then area = a; bx = ap.X + az.X / 2; by = ap.Y + az.Y / 2 end
+                end
+            end
+        end
+        if bx then
+            LSM.lastBot = tick_()
+            mousemoveabs(mfloor(bx), mfloor(by)); mouse1press(); mouse1release()
+            task_wait(0.05)
+            mousemoveabs(mfloor(bx), mfloor(by)); mouse1press(); mouse1release()
+        end
+    end)
+    -- 2) центр экрана - страховка
+    pcall_(function()
+        LSM.lastBot = tick_()
+        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); mouse1press(); mouse1release()
+        task_wait(0.05)
+        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); mouse1press(); mouse1release()
     end)
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
@@ -3174,7 +3202,7 @@ _wrap("auto-minigame", function()
                 -- EXIT/ЧЕК обрабатываем ТОЛЬКО ~25с после гонки. Иначе checkUp/
                 -- resultUp ложно срабатывали на скрытых лейблах (видимость в Матче
                 -- ненадёжна) и цикл застревал, не доходя до входа в игру.
-                local justRaced = (tick_() - (MG.raceEndT or 0)) < 25
+                local justRaced = (tick_() - (MG.raceEndT or 0)) < 40
                 -- 2) РЕЗУЛЬТАТ гонки ("YOU GOT...") -> жмём EXIT
                 if justRaced and MG.resultUp() then
                     LSM.standBusyT = tick_()
@@ -3183,10 +3211,10 @@ _wrap("auto-minigame", function()
                     task_wait(0.5)
                     return
                 end
-                -- 3) ЧЕК на экране -> клик по центру (забрать деньги)
+                -- 3) ЧЕК на экране -> клик по чеку (забрать деньги)
                 if justRaced and MG.checkUp() then
                     LSM.standBusyT = tick_()
-                    MG.clickCenter()
+                    MG.clickCheck()
                     task_wait(0.5)
                     return
                 end
