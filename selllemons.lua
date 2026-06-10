@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v16.1 — стенд ТП в точку E (апгрейд-промпт), а не в центр площадки ]] --
+-- [[ SELL LEMONS v16.2 — стенд ТП перед стендом (промпт + сдвиг к площадке), не криво/не внутрь ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -302,11 +302,23 @@ local function getStandLocations()
         local nm = tostring_(folder.Name)
         local low = nm:lower()
         if low:find("lemon") and not low:find("lemonx") then
-            -- 1) точка апгрейда (где E); 2) запасной вариант - Locations
+            -- v16.2: точка E (промпт) + сдвиг к центру площадки (Locations), чтобы
+            -- персонаж вставал ПЕРЕД стендом, а не внутрь конструкции ("криво").
             local pos = _standUpgradePos(folder, nm)
-            if not pos and loc then
+            local lpos = nil
+            if loc then
                 local lc = loc:FindFirstChild(nm)
-                if lc then pos = _standPartPos(lc) end
+                if lc then lpos = _standPartPos(lc) end
+            end
+            if pos and lpos then
+                local d = lpos - pos
+                local m = d.Magnitude
+                if m > 0.1 then
+                    local step = m < 6 and m or 6   -- сдвиг к центру, максимум 6 студов
+                    pos = pos + (d / m) * step
+                end
+            elseif not pos then
+                pos = lpos
             end
             if pos then tinsert(out, {name = nm, pos = pos}) end
         end
