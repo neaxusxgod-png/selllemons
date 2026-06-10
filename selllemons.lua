@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v12.8 — лоза: READY из реального состояния игры (VineKey), кулдаун с момента сбора ]] --
+-- [[ SELL LEMONS v12.9 — мгновенный старт лимонки (CanQuery batched) | лоза ТП по позиции ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -1814,27 +1814,29 @@ local function findTreeOf(clickPart)
     return nil
 end
 
+-- v12.9: ОДИН pcall вместо тысяч. pcall на каждую часть дерева давал
+-- многосекундную задержку перед первым фруктом - камера ''не поднималась''
+-- всё это время.
 local function disableTreeCanQuery(tree, excludeSet)
     local modified, n = {}, 0
-    for _, part in ipairs_(tree:GetDescendants()) do
-        if part:IsA("BasePart") and not excludeSet[part] then
-            pcall_(function()
-                if part.CanQuery then
-                    part.CanQuery = false
-                    n = n + 1
-                    modified[n] = part
-                end
-            end)
+    pcall_(function()
+        for _, part in ipairs_(tree:GetDescendants()) do
+            if part:IsA("BasePart") and not excludeSet[part] and part.CanQuery then
+                part.CanQuery = false
+                n = n + 1
+                modified[n] = part
+            end
         end
-    end
+    end)
     return modified, n
 end
 
 local function restoreTreeCanQuery(modified, n)
-    for i = 1, n do
-        local part = modified[i]
-        pcall_(function() part.CanQuery = true end)
-    end
+    pcall_(function()
+        for i = 1, n do
+            modified[i].CanQuery = true
+        end
+    end)
 end
 
 -- ==================== LEMON SILENT MODES (v7.4) ====================
@@ -2120,6 +2122,14 @@ _wrap("lemon-farm", function()
                 -- камеру и перетирает наш lookAt - голова не поднималась.
                 -- Оригинальный метод: камера ставится lookAt-ом на каждый фрукт.
                 print("[Lemon] AFK -> farm")
+                -- v12.9: поднять взгляд сразу, не дожидаясь первого фрукта
+                pcall_(function()
+                    local chrA = player.Character
+                    local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
+                    if hA then
+                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
+                    end
+                end)
             else
                 print("[Lemon] input detected -> back to your spot")
                 LSM.returnHome()
@@ -2274,35 +2284,32 @@ local function pollInput()
         end
     end
 
-    -- Cash Vine (v12.7): ВКЛ = запомнить место и ТП к лозе, ВЫКЛ = вернуться.
-    -- Точные корды дал оператор (Sewer общий для всех игроков, не тайкун).
-    if CFG.vineGo then
+    -- Cash Vine (v12.9): направление по ПОЗИЦИИ, а не по состоянию тоггла
+    -- (тоггл рассинхронивался: со второго раза ''только возвращал''). Рядом
+    -- с лозой = вернуться, далеко = запомнить место и ТП к лозе.
+    if CFG.vineGo or CFG.vineBack then
         CFG.vineGo = false
+        CFG.vineBack = false
         pcall_(function()
             local chr = player.Character
             local h = chr and chr:FindFirstChild("HumanoidRootPart")
-            if h then
+            if not h then return end
+            local nearVine = (h.Position - Vec3(39.7, -41.0, -77.5)).Magnitude < 40
+            if nearVine then
+                local ret = CFG.vineRet
+                if ret then
+                    h.CFrame = CF(ret.X, ret.Y + 1, ret.Z)
+                    h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+                    CFG.vineRet = nil
+                    rprint("[Vine] returned")
+                end
+            else
                 CFG.vineRet = h.Position
                 h.CFrame = CF(39.7, -41.0, -77.5)
                 h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+                rprint("[Vine] at the vine - press again to return")
             end
         end)
-        rprint("[Vine] at the vine - toggle OFF to return")
-    end
-    if CFG.vineBack then
-        CFG.vineBack = false
-        if CFG.vineRet then
-            pcall_(function()
-                local chr = player.Character
-                local h = chr and chr:FindFirstChild("HumanoidRootPart")
-                if h then
-                    h.CFrame = CF(CFG.vineRet.X, CFG.vineRet.Y + 1, CFG.vineRet.Z)
-                    h.AssemblyLinearVelocity = Vec3(0, 0, 0)
-                end
-            end)
-            CFG.vineRet = nil
-            rprint("[Vine] returned")
-        end
     end
 
     -- Статус-строки с делеями: лимонка + стенд + лоза
