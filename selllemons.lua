@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18 — возврат камеры намеренный | стенд смотрит вниз+отдаляет | стенд-ожидание прерываемое ]] --
+-- [[ SELL LEMONS v18.1 — Auto Minigame фикс: PICK в PickGui, CHEER в MinigameRace - ищем по всему PlayerGui ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -2828,13 +2828,11 @@ _wrap("auto-deal", function()
     end
 end)
 
--- ==================== AUTO MINIGAME (v17) ====================
--- Скамейка PLAY (E) -> экран "WHO WILL WIN?" жмём любой PICK -> гонка: спамим
--- CHEER до победы. Кнопки ищем по тексту в PlayerGui.MinigameRace.
-function MG.root()
-    local pg = player:FindFirstChildOfClass("PlayerGui")
-    return pg and pg:FindFirstChild("MinigameRace")
-end
+-- ==================== AUTO MINIGAME (v18.1) ====================
+-- Зонд раскрыл структуру: PLAY = PromptGui (или E у скамейки); PICK = 4 кнопки
+-- в PlayerGui.PickGui; CHEER = PlayerGui.MinigameRace.Button (текст exit<->cheer).
+-- Ищем кнопки по тексту по ВСЕМУ PlayerGui (v17 искал только в MinigameRace ->
+-- не находил PICK). Спамим CHEER, жмём любой PICK, на скамейке - E/PLAY.
 function MG.text(d)
     local t; pcall_(function() t = d.Text end)
     if not t or t == "" then
@@ -2859,13 +2857,22 @@ function MG.shown(o)
     end
     return true
 end
-function MG.find(root, want)
+-- найти кнопку по тексту во ВСЁМ PlayerGui; needPos=true -> только с реальной
+-- экранной позицией (PICK-кнопки иногда 0,0 пока не отрисовались).
+function MG.findBtn(want, needPos)
+    local pg = player:FindFirstChildOfClass("PlayerGui")
+    if not pg then return nil end
     local hit
     pcall_(function()
-        for _, d in ipairs_(root:GetDescendants()) do
+        for _, d in ipairs_(pg:GetDescendants()) do
             local cn = tostring_(d.ClassName)
-            if (cn == "TextButton" or cn == "ImageButton") and MG.shown(d) then
-                if MG.text(d):find(want) then hit = d; return end
+            if (cn == "TextButton" or cn == "ImageButton") and MG.shown(d) and MG.text(d):find(want) then
+                if needPos then
+                    local ap = d.AbsolutePosition
+                    if ap and (ap.X > 1 or ap.Y > 1) then hit = d; return end
+                else
+                    hit = d; return
+                end
             end
         end
     end)
@@ -2875,6 +2882,7 @@ function MG.click(btn)
     local ap, az
     pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
     if not ap or not az then return end
+    if ap.X <= 1 and ap.Y <= 1 then return end   -- ещё не отрисована -> не кликаем в угол
     local inset = 0
     pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
     local ox, oy = S.mx, S.my
@@ -2905,37 +2913,35 @@ _wrap("auto-minigame", function()
     while ScriptActive do
         if MG.active then
             pcall_(function()
-                local root = MG.root()
-                if root and MG.shown(root) then
-                    LSM.standBusyT = tick_()   -- идёт минигейм -> лимонка/стенд не лезут
-                    -- 1) гонка: CHEER -> спамим
-                    local cheer = MG.find(root, "CHEER")
-                    if cheer then
-                        for _ = 1, 10 do
-                            if not MG.active then break end
-                            MG.click(cheer)
-                            task_wait(0.04)
-                        end
-                        return
+                -- 1) ГОНКА: кнопка CHEER (только когда текст реально "cheer", не "exit")
+                local cheer = MG.findBtn("CHEER", true)
+                if cheer then
+                    LSM.standBusyT = tick_()   -- идёт гонка -> лимонка/стенд не лезут
+                    for _ = 1, 12 do
+                        if not MG.active then break end
+                        MG.click(cheer)
+                        task_wait(0.04)
                     end
-                    -- 2) выбор: PICK -> жмём любой
-                    local pick = MG.find(root, "PICK")
-                    if pick then
-                        MG.click(pick)
-                        task_wait(0.5)
-                        return
-                    end
-                    return   -- экран итогов/Exit - ждём
+                    return
                 end
-                -- v17.1: не в минигейме -> ТП к скамейке + спам E (PLAY). БЕЗ
-                -- AFK-гейта: включил тоггл = играем (ты сам так решил). Жмём E и
-                -- стоя на месте (вдруг уже у скамейки), и после ТП.
+                -- 2) ВЫБОР: любой PICK с реальной позицией
+                local pick = MG.findBtn("PICK", true)
+                if pick then
+                    LSM.standBusyT = tick_()
+                    MG.click(pick)
+                    task_wait(0.35)
+                    return
+                end
+                -- 3) на скамейке: клик по кнопке PLAY (если есть позиция) + спам E,
+                --    при необходимости ТП к скамейке. Без AFK-гейта.
                 LSM.standBusyT = tick_()
+                local play = MG.findBtn("PLAY", true)
+                if play then MG.click(play) end
                 local pos = MG.entryPos()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
-                for _ = 1, 14 do
+                for _ = 1, 12 do
                     if not MG.active then break end
-                    if MG.root() and MG.shown(MG.root()) then break end   -- минигейм пошёл
+                    if MG.findBtn("PICK") or MG.findBtn("CHEER", true) then break end   -- минигейм пошёл
                     keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
                 task_wait(0.3)
