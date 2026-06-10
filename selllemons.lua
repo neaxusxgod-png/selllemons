@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.16 — стенд-камера ПКМ-орбитой (без мерцания) | сохранение убрано | FPS Save режим ]] --
+-- [[ SELL LEMONS v18.17 — фикс таймера Cash Vine (показывало 8ч): метка из будущего/чужой лейбл отбрасываются ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.16 ===")
+print("=== SELL LEMONS v18.17 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -197,7 +197,10 @@ local S = {
 pcall_(function()
     if type(readfile) == "function" then
         local v = tonumber(readfile("selllemons_vine.txt"))
-        if v then CFG.vineT = v end
+        -- v18.17: мусор не грузим. Метка из БУДУЩЕГО (база tick() могла съехать
+        -- после обновления Матчи -> показывало "8 часов") или древняя -> с нуля;
+        -- у лозы пересинкается с живого лейбла.
+        if v and v <= tick_() and (tick_() - v) < 7 * 24 * 3600 then CFG.vineT = v end
     end
 end)
 local UX = {}
@@ -333,7 +336,8 @@ MG.timerSec = function()
                         local hh, mm, ss = tostring_(t or ""):match("^%s*(%d+):(%d%d):(%d%d)%s*$")
                         if hh then
                             local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
-                            if r > 0 then rem = r; return end
+                            -- v18.17: кулдаун минигейма - минуты; >2ч = чужой лейбл, не берём
+                            if r > 0 and r < 2 * 3600 then rem = r; return end
                         end
                     end
                 end
@@ -2008,6 +2012,9 @@ local function pollInput()
         pcall_(function()
             local hh, mm, ss = vTimer:match("^(%d+):(%d%d):(%d%d)$")
             local remS = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
+            -- v18.17: "осталось" больше кулдауна = это НЕ таймер лозы (чужой
+            -- лейбл/мусор; один раз так вписало 8ч) - такое не синкаем
+            if remS > CFG.vineCd + 60 then return end
             local newT = tick_() - (CFG.vineCd - remS)
             if not CFG.vineT or mabs(newT - CFG.vineT) > 60 then
                 CFG.vineT = newT
@@ -2015,6 +2022,15 @@ local function pollInput()
                     writefile("selllemons_vine.txt", tostring_(CFG.vineT))
                 end
             end
+        end)
+    end
+    -- v18.17: последний рубеж - метка старта кулдауна из будущего физически
+    -- невозможна (это и давало "осталось 8 часов"). Сбрасываем; рядом с лозой
+    -- таймер пересинкается сам, а READY придёт от VineKey.
+    if CFG.vineT and CFG.vineT > tick_() + 60 then
+        CFG.vineT = nil
+        pcall_(function()
+            if type(writefile) == "function" then writefile("selllemons_vine.txt", "") end
         end)
     end
     -- v13.1: показываем СВОЙ тикающий отсчёт всегда (замок обновляется
