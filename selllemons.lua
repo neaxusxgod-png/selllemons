@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.36 ===")
+print("=== SELL LEMONS v18.37 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -582,7 +582,7 @@ if homesick then
         print("[Hub] toggle AutoStand = " .. tostring_(val))
     end):addKeybind("3", "Toggle", true, function() end)
 
-    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", true, function(val)
+    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Bags Farm", true, function(val)
         cashFarmActive = val
         S.saveState()
         print("[Hub] toggle CashFarm = " .. tostring_(val))
@@ -590,7 +590,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.36  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.37  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -598,9 +598,7 @@ if homesick then
 
     UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
         MG.active = val
-        if not val then
-            MG.sessExit = 0; MG.sessCheck = 0; MG.exitSeen = false; MG.popupSeen = false
-        end
+        if not val then MG.sessPost = 0 end
         S.saveState()
         print("[Hub] toggle AutoMinigame = " .. tostring_(val))
     end)
@@ -2488,7 +2486,7 @@ _wrap("auto-minigame", function()
                 local cheer = MG.findBtn("CHEER")
                 if cheer then
                     LSM.standBusyT = tick_()
-                    MG.sessExit = 0; MG.sessCheck = 0
+                    MG.sessPost = 0
                     MG.spamCheer(cheer)
                     MG.raceEndT = tick_()
                     return
@@ -2496,36 +2494,26 @@ _wrap("auto-minigame", function()
 
                 local justRaced = (tick_() - (MG.raceEndT or 0)) < 30
 
-                local exitBtn = justRaced and MG.findBtn("EXIT") or nil
-                if exitBtn then
-                    MG.sessExit = (MG.sessExit or 0) + 1
-                    if MG.sessExit <= 6 then
-                        LSM.standBusyT = tick_()
-                        MG.click(exitBtn)
-                        task_wait(0.35)
-                    else task_wait(0.5) end
-                    return
-                end
-
-                local popUp = false
                 if justRaced then
+                    local exitBtn = MG.findBtn("EXIT")
+                    local chequeShown = false
                     pcall_(function()
                         local pg = getPlayerGui()
-                        local popup = pg and pg:FindFirstChild("Popup")
-                        if popup then
-                            local en; pcall_(function() en = popup.Enabled end)
-                            if en ~= false and popup:FindFirstChild("Check") then popUp = true end
-                        end
+                        local main = pg and pg:FindFirstChild("Popup")
+                        main = main and main:FindFirstChild("Check")
+                        main = main and main:FindFirstChild("Main")
+                        if main and MG.shown(main) then chequeShown = true end
                     end)
-                end
-                if popUp then
-                    MG.sessCheck = (MG.sessCheck or 0) + 1
-                    if MG.sessCheck <= 6 then
-                        LSM.standBusyT = tick_()
-                        MG.clickCheck()
-                        task_wait(0.35)
-                    else task_wait(0.5) end
-                    return
+                    if exitBtn or chequeShown then
+                        MG.sessPost = (MG.sessPost or 0) + 1
+                        if MG.sessPost <= 8 then
+                            LSM.standBusyT = tick_()
+                            if exitBtn then MG.click(exitBtn) end
+                            if chequeShown then MG.clickCheck() end
+                            task_wait(0.4)
+                        else task_wait(0.5) end
+                        return
+                    end
                 end
 
                 if MG.findBtn("PICK") then
@@ -2632,4 +2620,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.36 loaded")
+rprint("sell lemons v18.37 loaded")
