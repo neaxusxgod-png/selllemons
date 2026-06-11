@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.22 — Cash Vine: поиск лозы по имени (Cosmic Cash Vine и т.п.) - вернулись READY/таймер ]] --
+-- [[ SELL LEMONS v18.23 — Cash Vine: детект по одному лейблу (VineKey пропал из игры), ClassName а не IsA ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.22 ===")
+print("=== SELL LEMONS v18.23 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -1887,6 +1887,32 @@ function LSM.findVine()
     return found
 end
 
+-- v18.23: лоза теперь БЕЗ VineKey (зонд: его нет). Всё состояние в ОДНОМ лейбле
+-- Map.Sewer.cashvine...attachment.gui.label ("HH:MM:SS" / "ready"). Находим и
+-- кэшируем его по ClassName (НЕ IsA - IsA в Матче врёт), перепоиск не чаще 2с.
+function LSM.findVineLabel()
+    local l = LSM.vineLblRef
+    if l and l.Parent then return l end
+    if (tick_() - (LSM.vineScanT or 0)) < 2 then return nil end
+    LSM.vineScanT = tick_()
+    local cv = LSM.findVine()
+    if not cv then return nil end
+    local found
+    pcall_(function()
+        for _, d in ipairs_(cv:GetDescendants()) do
+            if tostring_(d.ClassName) == "TextLabel" then
+                local t; pcall_(function() t = d.Text end)
+                t = tostring_(t or "")
+                if t:match("^%s*%d+:%d%d:%d%d%s*$") or t:upper():find("READY") or t:upper():find("HARVEST") then
+                    found = d; break
+                end
+            end
+        end
+    end)
+    LSM.vineLblRef = found
+    return found
+end
+
 local function pollInput()
     if not ScriptActive then return end
     local nowA = tick_()
@@ -2014,34 +2040,27 @@ local function pollInput()
     else
         statusTx2.Visible = false
     end
-    -- v12.8: РЕАЛЬНОЕ состояние лозы из игры: VineKey видим = готова
-    -- (нашли зондом: Workspace.Map.Sewer.CashVine.VineKey, Transparency 1<->0).
-    -- Переход видим->невидим = момент сбора: настоящий старт 4ч кулдауна.
-    local vReady
+    -- v18.23: состояние лозы из ОДНОГО лейбла (VineKey больше нет). "HH:MM:SS"
+    -- = кулдаун (vReady=false, vTimer=время), "ready"/"harvest" = готова. Переход
+    -- готова->кулдаун = момент сбора (старт 4ч). Таймер тикает только рядом ->
+    -- замороженный (ушёл далеко) для синка НЕ берём (vineLblChangeT < 3с).
+    local vReady, vTimer
     pcall_(function()
-        local cv = LSM.findVine()
-        local k = LSM.vineKeyRef
-        if not (k and k.Parent) then
-            k = cv and cv:FindFirstChild("VineKey")
-            LSM.vineKeyRef = k
-        end
-        if k then
-            vReady = (k.Transparency < 0.5)
-        elseif cv then
-            -- v18.22: VineKey не нашёлся (мог переименоваться) -> READY по лейблам.
-            -- Тикающий таймер "Ч:ММ:СС" = кулдаун (не готова); видимый "READY"/
-            -- "HARVEST" без таймера = готова.
-            local hasTimer, hasReady = false, false
-            for _, d in ipairs_(cv:GetDescendants()) do
-                if tostring_(d.ClassName) == "TextLabel" then
-                    local t; pcall_(function() t = d.Text end)
-                    t = tostring_(t or "")
-                    if t:match("^%s*%d+:%d%d:%d%d%s*$") then hasTimer = true
-                    elseif t:upper():find("READY") or t:upper():find("HARVEST") then hasReady = true end
+        local lbl = LSM.findVineLabel()
+        if lbl and lbl.Parent then
+            local t; pcall_(function() t = lbl.Text end)
+            t = tostring_(t or "")
+            local tm = t:match("^%s*(%d+:%d%d:%d%d)%s*$")
+            if tm then
+                vReady = false
+                if t ~= LSM.vineLblLast then
+                    LSM.vineLblLast = t
+                    LSM.vineLblChangeT = tick_()
                 end
+                if (tick_() - (LSM.vineLblChangeT or 0)) < 3 then vTimer = tm end
+            elseif t:upper():find("READY") or t:upper():find("HARVEST") then
+                vReady = true
             end
-            if hasTimer then vReady = false
-            elseif hasReady then vReady = true end
         end
     end)
     if vReady ~= nil then
@@ -2057,44 +2076,7 @@ local function pollInput()
         end
         LSM.vineWasReady = vReady
     end
-    -- v13: НАСТОЯЩИЙ таймер - игра сама рисует отсчёт на замке (TextLabel
-    -- ''02:32:08'' под Map.Sewer.CashVine). Читаем его текст напрямую.
-    local vTimer
-    pcall_(function()
-        local lbl = LSM.vineLblRef
-        if lbl and lbl.Parent then
-            local t = tostring_(lbl.Text)
-            if t:match("^%d+:%d%d:%d%d$") then
-                if t ~= LSM.vineLblLast then
-                    LSM.vineLblLast = t
-                    LSM.vineLblChangeT = tick_()
-                end
-                -- v13.1: текст тикает только рядом с лозой; замороженный
-                -- (ушёл далеко) для синхронизации НЕ берём
-                if (tick_() - (LSM.vineLblChangeT or 0)) < 3 then
-                    vTimer = t
-                end
-            end
-        end
-        if not vTimer and (tick_() - (LSM.vineScanT or 0)) > 3 then
-            LSM.vineScanT = tick_()
-            LSM.vineLblRef = nil
-            local cv = LSM.findVine()
-            if cv then
-                for _, d in ipairs_(cv:GetDescendants()) do
-                    if d:IsA("TextLabel") then
-                        local t2 = tostring_(d.Text)
-                        if t2:match("^%d+:%d%d:%d%d$") then
-                            LSM.vineLblRef = d
-                            LSM.vineLblLast = t2
-                            LSM.vineLblChangeT = 0   -- доверяем после первого тика
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end)
+    -- (vTimer уже вычислен выше из того же лейбла - отдельный блок не нужен)
     if vTimer then
         -- синхронизируем локальную оценку с настоящим временем (для оффлайна)
         pcall_(function()
@@ -2114,7 +2096,7 @@ local function pollInput()
     end
     -- v18.17: последний рубеж - метка старта кулдауна из будущего физически
     -- невозможна (это и давало "осталось 8 часов"). Сбрасываем; рядом с лозой
-    -- таймер пересинкается сам, а READY придёт от VineKey.
+    -- таймер пересинкается сам с лейбла.
     if CFG.vineT and CFG.vineT > tick_() + 60 then
         CFG.vineT = nil
         pcall_(function()
@@ -2702,4 +2684,4 @@ end
 
 -- v18.19: версия в видимом логе - чтобы было видно, что raw-кэш GitHub (~5 мин)
 -- отдал СВЕЖИЙ скрипт, а не старый
-rprint("sell lemons v18.22 loaded")
+rprint("sell lemons v18.23 loaded")
