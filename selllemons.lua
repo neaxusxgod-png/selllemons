@@ -144,7 +144,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.25 ===")
+print("=== SELL LEMONS v18.26 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -2299,9 +2299,8 @@ function MG.clickRatio(fx, fy)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     LSM.lastBot = tick_()
-    pcall_(function()
-        mousemoveabs(mfloor(vw * fx), mfloor(vh * fy)); mouse1press(); mouse1release()
-    end)
+    pcall_(function() mousemoveabs(mfloor(vw * fx), mfloor(vh * fy)) end)
+    MG.tap()
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
 
@@ -2383,17 +2382,15 @@ function MG.clickCheck()
         end
         if bx then
             LSM.lastBot = tick_()
-            mousemoveabs(mfloor(bx), mfloor(by)); mouse1press(); mouse1release()
-            task_wait(0.05)
-            mousemoveabs(mfloor(bx), mfloor(by)); mouse1press(); mouse1release()
+            mousemoveabs(mfloor(bx), mfloor(by)); MG.tap()
+            mousemoveabs(mfloor(bx), mfloor(by)); MG.tap()
         end
     end)
 
     pcall_(function()
         LSM.lastBot = tick_()
-        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); mouse1press(); mouse1release()
-        task_wait(0.05)
-        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); mouse1press(); mouse1release()
+        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); MG.tap()
+        mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); MG.tap()
     end)
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
@@ -2407,37 +2404,44 @@ _wrap("auto-minigame", function()
                     LSM.standBusyT = tick_()
                     MG.exitTries = 0
                     MG.checkTries = 0
-                    MG.checkDone = false
                     MG.spamCheer(cheer)
                     MG.raceEndT = tick_()
                     return
                 end
 
-                local justRaced = (tick_() - (MG.raceEndT or 0)) < 40
+                local exitBtn = MG.findBtn("EXIT")
+                local justRaced = (tick_() - (MG.raceEndT or 0)) < 15
 
-                local exitBtn = (not MG.checkDone) and (MG.exitTries or 0) < 6 and MG.findBtn("EXIT") or nil
-                if not MG.checkDone and not MG.checkUp() and (MG.exitTries or 0) < 6 and (exitBtn or (justRaced and MG.resultUp())) then
+                if not justRaced then
+                    local pg = player:FindFirstChildOfClass("PlayerGui")
+                    local mr = pg and pg:FindFirstChild("MinigameRace")
+                    if mr and MG.scanBtns(mr, "EXIT") then
+                        MG.raceEndT = tick_(); MG.exitTries = 0; MG.checkTries = 0
+                        justRaced = true
+                    end
+                end
+
+                if justRaced and (MG.exitTries or 0) < 3 then
                     LSM.standBusyT = tick_()
                     MG.exitTries = (MG.exitTries or 0) + 1
-                    if not justRaced then MG.raceEndT = tick_() - 30 end
                     if exitBtn then MG.click(exitBtn) end
                     MG.clickRatio(0.5, 0.80); MG.clickRatio(0.5, 0.86); MG.clickRatio(0.5, 0.91)
-                    task_wait(0.6)
+                    task_wait(0.35)
                     return
                 end
 
-                if justRaced and not MG.checkDone and MG.checkUp() then
+                if justRaced and (MG.exitTries or 0) >= 3 and (MG.checkTries or 0) < 3 then
                     LSM.standBusyT = tick_()
+                    MG.checkTries = (MG.checkTries or 0) + 1
                     MG.clickCheck()
-                    MG.checkDone = true
-                    MG.raceEndT = 0
+                    task_wait(0.35)
                     return
                 end
 
                 if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
-                    MG.checkDone = false
                     MG.exitTries = 0
+                    MG.checkTries = 0
                     MG.clickSlots()
                     task_wait(0.4)
                     return
@@ -2543,4 +2547,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.25 loaded")
+rprint("sell lemons v18.26 loaded")
