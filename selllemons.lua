@@ -606,8 +606,9 @@ if homesick then
 
     UIRef.win = window
 
-    local tab1 = window:addTab("Main")
-    local left = tab1:addSection("Farming", "Left")
+    local tab1 = window:addTab("Features")
+
+    local left = tab1:addSection("Farming", "Right")
 
     UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
         autoBuyActive = val
@@ -621,6 +622,14 @@ if homesick then
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
+    pcall_(function()
+        UIRef.t.AfkDelay = left:addSlider("afkDelay", "AFK delay", 1, 30, CFG.afkDelay or 6, function(val)
+            local s = mfloor(tonumber_(val) or 6)
+            if s < 1 then s = 1 elseif s > 30 then s = 30 end
+            CFG.afkDelay = s
+        end)
+    end)
+
     UIRef.t.AutoStand = left:addToggle("autoStand", "Auto Stand", false, function(val)
         autoStandActive = val
         S.saveState()
@@ -633,9 +642,9 @@ if homesick then
         print("[Hub] toggle CashFarm = " .. tostring_(val))
     end):addKeybind("4", "Toggle", true, function() end)
 
-    local right = tab1:addSection("Control", "Right")
+    local right = tab1:addSection("Control", "Left")
 
-    pcall_(function() window:setBadge("Sell Lemons v19  |  by Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v19.3  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -669,12 +678,12 @@ if homesick then
         end)
     end)
 
+    pcall_(function() right:addSeparator() end)
+
     UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
         CFG.slow = val and true or false
         if val then FX.apply() else FX.restore() end
     end)
-
-    pcall_(function() right:addSeparator() end)
 
     UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
         if val then
@@ -693,7 +702,7 @@ if homesick then
     UIRef.standCb = {}
     UIRef.miniCb = {}
     pcall_(function()
-        local autoTab = window:addTab("Auto")
+        local autoTab = window:addTab("Stands & Games")
         local sec = autoTab:addSection("Stands", "Left")
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
@@ -2433,11 +2442,36 @@ function RB.findConfirm()
     return best
 end
 
+function RB.prepClick()
+    RB.busyT = tick_()
+    if lemonFarmActive and LSM.zoomedIn then
+        pcall_(function() LSM.zoom(-1) end)
+        RB.busyT = tick_()
+    end
+end
+
+function RB.click(node)
+    local ap, az
+    pcall_(function() ap = node.AbsolutePosition; az = node.AbsoluteSize end)
+    if not ap or not az then return false end
+    if ap.X <= 1 and ap.Y <= 1 then return false end
+    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2)
+    local ox, oy = S.mx, S.my
+    pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
+    RB.busyT = tick_(); LSM.lastBot = tick_()
+    pcall_(function()
+        mousemoveabs(cx, cy); task_wait()
+        mouse1press(); task_wait(); mouse1release(); task_wait()
+        if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
+    end)
+    return true
+end
+
 function RB.doRebirth(g)
     local rb = RB.node(g, "InvestorsMenu/Body/Rebirth")
     if not rb then RB.status = "REBIRTH button not found"; rprint("[Rebirth] panel REBIRTH button missing"); return end
-    RB.busyT = tick_()
-    MG.click(rb)
+    RB.prepClick()
+    RB.click(rb)
     local cf
     for _ = 1, 8 do
         task_wait(0.5)
@@ -2452,7 +2486,7 @@ function RB.doRebirth(g)
         return
     end
     local cashBefore = RB.cashLog()
-    MG.click(cf)
+    RB.click(cf)
     local done = false
     for i = 1, 2 do
         task_wait(1.2)
@@ -2460,7 +2494,7 @@ function RB.doRebirth(g)
         local cashNow = RB.cashLog()
 
         if not cashBefore or not cashNow or cashNow < cashBefore - 3 then done = true; break end
-        if i == 1 then MG.click(cf) end
+        if i == 1 then RB.click(cf) end
     end
     if done then
         RB.lastReb = tick_()
@@ -2485,10 +2519,7 @@ function RB.tick()
     if (now - (RB.lastReb or 0)) < 30 then RB.go = false; RB.status = "cooldown"; return end
 
     local who
-    if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then who = "auto buy"
-    elseif autoStandActive and (now - (LSM.standBusyT or 0)) < 4 then who = "auto stand"
-    elseif MG.active and ((now - (MG.raceEndT or 0)) < 30 or (now - (MG.lastEntryTry or 0)) < 75) then who = "minigame"
-    end
+    if MG.active and (now - (MG.busyT or 0)) < 5 then who = "minigame" end
     if who then RB.go = false; RB.goSince = 0; RB.status = "waiting: " .. who; return end
 
     local g = RB.gui()
@@ -2504,16 +2535,12 @@ function RB.tick()
     if not isOpen then
         RB.go = false
         if (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then
-
-            RB.busyT = now
-            if not RB.claimT or (now - RB.claimT) > 5 then RB.claimT = now; RB.status = "opening panel..."; return end
-            RB.claimT = nil
             RB.lastPeek = now
+            RB.prepClick()
             local sb = RB.node(g, "Sidebar/Container/Investors")
-            if sb then MG.click(sb); RB.openedAt = now; RB.status = "opening panel..."
+            if sb then RB.click(sb); RB.openedAt = now; RB.status = "opening panel..."
             else RB.status = "Investors button not found"; rprint("[Rebirth] sidebar Investors missing") end
         else
-            RB.claimT = nil
             RB.status = "idle"
         end
         return
@@ -2536,11 +2563,13 @@ function RB.tick()
     if go then
 
         if (RB.goSince or 0) == 0 then RB.goSince = now end
-        if (now - RB.goSince) >= 1.6 then RB.doRebirth(g) end
+        if (now - RB.goSince) >= 1.6 then RB.doRebirth(g); RB.busyT = 0 end
     else
         RB.goSince = 0
         local close = RB.node(g, "InvestorsMenu/Close")
-        if close then MG.click(close) end
+        if close then RB.prepClick(); RB.click(close) end
+        RB.busyT = 0
+        RB.openedAt = nil
         RB.lastPeek = now
     end
 end
@@ -2704,6 +2733,7 @@ function MG.spamCheer(btn)
     local tCap = tick_()
     while MG.active and ScriptActive and (tick_() - tCap) < 75 do
         LSM.lastBot = tick_()
+        MG.busyT = tick_()
         MG.tap()
         n = n + 1
         if n % 8 == 0 then
@@ -2805,7 +2835,7 @@ _wrap("auto-minigame", function()
                     if exitBtn or chequeShown then
                         MG.sessPost = (MG.sessPost or 0) + 1
                         if MG.sessPost <= 8 then
-                            LSM.standBusyT = tick_()
+                            LSM.standBusyT = tick_(); MG.busyT = tick_()
                             if exitBtn then MG.click(exitBtn) end
                             if chequeShown then MG.clickCheck() end
                             task_wait(0.4)
@@ -2815,7 +2845,7 @@ _wrap("auto-minigame", function()
                 end
 
                 if MG.findBtn("PICK") then
-                    LSM.standBusyT = tick_()
+                    LSM.standBusyT = tick_(); MG.busyT = tick_()
                     MG.clickSlots()
                     task_wait(0.4)
                     return
@@ -2918,4 +2948,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v19 loaded  |  by Inspecttor")
+rprint("sell lemons v19.3 loaded  |  by Inspecttor")
