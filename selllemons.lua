@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.38 ===")
+print("=== SELL LEMONS v18.39 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -172,11 +172,29 @@ local S = {
     lastUser = tick_(), pmx = 0, pmy = 0, keyDown = {}, lastFire = {},
 }
 
+local function _osNow() if type(os) == "table" and type(os.time) == "function" then return os.time() end return nil end
+local function _saveVineReady()
+    pcall_(function()
+        if type(writefile) ~= "function" or not CFG.vineT then return end
+        local rem = CFG.vineCd - (tick_() - CFG.vineT)
+        if rem < 0 then rem = 0 end
+        local onow = _osNow()
+        writefile("selllemons_vine.txt", tostring_(mfloor((onow or tick_()) + rem)))
+    end)
+end
 pcall_(function()
-    if type(readfile) == "function" then
-        local v = tonumber(readfile("selllemons_vine.txt"))
+    if type(readfile) ~= "function" then return end
+    local saved = tonumber(readfile("selllemons_vine.txt"))
+    if not saved then return end
+    local onow = _osNow()
+    if onow then
+        local rem = saved - onow
+        if rem > 0 and rem < CFG.vineCd + 60 then
+            CFG.vineT = tick_() - (CFG.vineCd - rem)
+        end
 
-        if v and v <= tick_() and (tick_() - v) < 7 * 24 * 3600 then CFG.vineT = v end
+    elseif saved <= tick_() and (tick_() - saved) < 7 * 24 * 3600 then
+        CFG.vineT = saved
     end
 end)
 local UX = {}
@@ -366,10 +384,15 @@ local standEnabled = {}
 local MG = { active = false, enabled = {} }
 
 pcall_(function()
-    if type(readfile) == "function" then
-        local v = tonumber(readfile("selllemons_mini.txt"))
-
-        if v and v > tick_() - 24 * 3600 and v < tick_() + 2 * 3600 then MG.miniEnd = v end
+    if type(readfile) ~= "function" then return end
+    local saved = tonumber(readfile("selllemons_mini.txt"))
+    if not saved then return end
+    local onow = _osNow()
+    if onow then
+        local rem = saved - onow
+        if rem > -24 * 3600 and rem < 2 * 3600 then MG.miniEnd = tick_() + rem end
+    elseif saved > tick_() - 24 * 3600 and saved < tick_() + 2 * 3600 then
+        MG.miniEnd = saved
     end
 end)
 MG.saveMiniEnd = function()
@@ -377,7 +400,10 @@ MG.saveMiniEnd = function()
     if (tick_() - (MG.saveT or 0)) < 20 then return end
     MG.saveT = tick_()
     pcall_(function()
-        if type(writefile) == "function" then writefile("selllemons_mini.txt", tostring_(MG.miniEnd)) end
+        if type(writefile) ~= "function" then return end
+        local onow = _osNow()
+        local rem = MG.miniEnd - tick_()
+        writefile("selllemons_mini.txt", tostring_(mfloor((onow or tick_()) + rem)))
     end)
 end
 
@@ -606,7 +632,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.38  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.39  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -2064,11 +2090,7 @@ local function pollInput()
         if LSM.vineWasReady == true and vReady == false then
             CFG.vineT = tick_()
             CFG.vineNotif = false
-            pcall_(function()
-                if type(writefile) == "function" then
-                    writefile("selllemons_vine.txt", tostring_(CFG.vineT))
-                end
-            end)
+            _saveVineReady()
             rprint("[Vine] collected -> 4h cooldown started")
         end
         LSM.vineWasReady = vReady
@@ -2084,9 +2106,7 @@ local function pollInput()
             local newT = tick_() - (CFG.vineCd - remS)
             if not CFG.vineT or mabs(newT - CFG.vineT) > 60 then
                 CFG.vineT = newT
-                if type(writefile) == "function" then
-                    writefile("selllemons_vine.txt", tostring_(CFG.vineT))
-                end
+                _saveVineReady()
             end
         end)
     end
@@ -2636,4 +2656,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.38 loaded")
+rprint("sell lemons v18.39 loaded")
