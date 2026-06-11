@@ -147,7 +147,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.40 ===")
+print("=== SELL LEMONS v18.39 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -635,7 +635,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.40  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.39  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -2847,20 +2847,16 @@ _wrap("auto-minigame", function()
                 end
 
                 if not MG.miniEnd then
-                    local synced, racing = false, false
+                    local synced = false
                     for _ = 1, 6 do
                         if not MG.active then break end
                         MG.tsT = 0
                         local cd2 = MG.timerSec()
                         if cd2 and cd2 > 0 then MG.miniEnd = tick_() + cd2; synced = true; break end
-                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then racing = true; break end
+                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then break end
                         task_wait(0.5)
                     end
-                    if synced or racing then task_wait(0.3); return end
-                end
-
-                if MG.findBtn("PICK") or MG.findBtn("CHEER") or MG.findBtn("EXIT") then
-                    task_wait(0.4); return
+                    if synced then task_wait(0.5); return end
                 end
 
                 if (tick_() - (MG.lastEntryTry or 0)) < 6 then task_wait(0.5); return end
@@ -2939,4 +2935,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.40 loaded")
+rprint("sell lemons v18.39 loaded")
