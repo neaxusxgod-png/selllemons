@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.34 ===")
+print("=== SELL LEMONS v18.35 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -307,13 +307,13 @@ do
     local ok, err = pcall_(function()
         local src = game:HttpGet("https://raw.githubusercontent.com/sharedechoes/Matcha-Luas/refs/heads/main/homesick.lua")
 
-        src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(255, 214, 60),')
-        src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(33, 29, 17),')
-        src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(27, 24, 14),')
-        src = src:gsub('surface2 = c3%(44, 40, 37%),', 'surface2 = c3(45, 40, 22),')
-        src = src:gsub('surface3 = c3%(54, 50, 46%),', 'surface3 = c3(58, 51, 28),')
-        src = src:gsub('border = c3%(60, 55, 52%),', 'border = c3(78, 68, 36),')
-        src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(168, 154, 112),')
+        src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(255, 226, 58),')
+        src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(20, 20, 16),')
+        src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(28, 28, 20),')
+        src = src:gsub('surface2 = c3%(44, 40, 37%),', 'surface2 = c3(40, 40, 28),')
+        src = src:gsub('surface3 = c3%(54, 50, 46%),', 'surface3 = c3(52, 52, 36),')
+        src = src:gsub('border = c3%(60, 55, 52%),', 'border = c3(74, 74, 46),')
+        src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(182, 176, 138),')
         src = src:gsub('%(ProjectState%.badgeText %.%. " | v1%.4%.0"%)', '(ProjectState.badgeText)')
         src = src:gsub('or "v1%.4%.0"', 'or ""')
 
@@ -564,25 +564,25 @@ if homesick then
     local tab1 = window:addTab("Main")
     local left = tab1:addSection("Farming", "Left")
 
-    UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
+    UIRef.t.AutoBuy = left:addToggle("autoBuy", "🛒 Auto Buy", false, function(val)
         autoBuyActive = val
         S.saveState()
         print("[Hub] toggle AutoBuy = " .. tostring_(val))
     end):addKeybind("1", "Toggle", true, function() end)
 
-    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
+    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "🍋 Lemon Farm", false, function(val)
         lemonFarmActive = val
         S.saveState()
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
-    UIRef.t.AutoStand = left:addToggle("autoStand", "Auto Stand", false, function(val)
+    UIRef.t.AutoStand = left:addToggle("autoStand", "🏪 Auto Stand", false, function(val)
         autoStandActive = val
         S.saveState()
         print("[Hub] toggle AutoStand = " .. tostring_(val))
     end):addKeybind("3", "Toggle", true, function() end)
 
-    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", true, function(val)
+    UIRef.t.CashFarm = left:addToggle("cashFarm", "💰 Cash Farm", true, function(val)
         cashFarmActive = val
         S.saveState()
         print("[Hub] toggle CashFarm = " .. tostring_(val))
@@ -590,13 +590,13 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.34  |  by neaxus") end)
-    UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
+    pcall_(function() window:setBadge("🍋 Sell Lemons v18.35  |  by neaxus") end)
+    UIRef.t.AutoDeal = right:addToggle("autoDeal", "📱 Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
     end)
 
-    UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
+    UIRef.t.AutoMini = right:addToggle("autoMini", "🎮 Auto Minigame", false, function(val)
         MG.active = val
         if not val then
             MG.sessExit = 0; MG.sessCheck = 0; MG.exitSeen = false; MG.popupSeen = false
@@ -605,7 +605,7 @@ if homesick then
         print("[Hub] toggle AutoMinigame = " .. tostring_(val))
     end)
 
-    UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
+    UIRef.t.CashVine = right:addToggle("cashVine", "🌿 Cash Vine TP", false, function(val)
         if val then
             CFG.vineGo = true
         else
@@ -613,14 +613,14 @@ if homesick then
         end
     end)
 
-    UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
+    UIRef.t.FpsSave = right:addToggle("fpsSave", "⚡ FPS Save (weak PC)", false, function(val)
         CFG.slow = val and true or false
         if val then FX.apply() else FX.restore() end
     end)
 
     pcall_(function() right:addSeparator() end)
 
-    UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
+    UIRef.t.StopAll = right:addToggle("stopAll", "🛑 Stop All", false, function(val)
         if val then
             stopAll()
             task.delay(0.1, function()
@@ -1850,7 +1850,7 @@ _wrap("cash-farm", function()
     end
 end)
 
-local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 214, 60)})
+local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 226, 58)})
 local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
@@ -2086,7 +2086,7 @@ local function pollInput()
 
     if vReady == true then
         statusTx3.Text = "cash vine  |  READY"
-        statusTx3.Color = C3rgb(255, 214, 60)
+        statusTx3.Color = C3rgb(255, 226, 58)
         if not CFG.vineNotif then
             CFG.vineNotif = true
             pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
@@ -2103,7 +2103,7 @@ local function pollInput()
             statusTx3.Color = C3rgb(222, 210, 170)
         else
             statusTx3.Text = "cash vine  |  READY"
-            statusTx3.Color = C3rgb(255, 214, 60)
+            statusTx3.Color = C3rgb(255, 226, 58)
             if not CFG.vineNotif then
                 CFG.vineNotif = true
                 pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
@@ -2129,7 +2129,7 @@ local function pollInput()
             statusTx4.Color = C3rgb(222, 210, 170)
         else
             statusTx4.Text = mgName .. "  |  READY"
-            statusTx4.Color = C3rgb(255, 214, 60)
+            statusTx4.Color = C3rgb(255, 226, 58)
             if MG.active and not MG.miniNotif then
                 MG.miniNotif = true
                 pcall_(function() notify(mgName .. " is READY", "Sell Lemons", 4) end)
@@ -2632,4 +2632,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.34 loaded")
+rprint("sell lemons v18.35 loaded")
