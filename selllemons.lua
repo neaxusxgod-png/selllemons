@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.18 — минигейм: READY/замороженный таймер | стенд: камера сверху вниз ПКМ-орбитой ]] --
+-- [[ SELL LEMONS v18.19 — фикс вечного READY минигейма (точный READY + ключ свежести по имени) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.18 ===")
+print("=== SELL LEMONS v18.19 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -331,10 +331,7 @@ MG.timerSec = function()
     local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
     local mg = pur and pur:FindFirstChild("Minigames")
     if not mg then return nil end
-    if not MG.lblSeen then
-        MG.lblSeen = {}
-        pcall_(function() setmetatable(MG.lblSeen, { __mode = "k" }) end)
-    end
+    MG.lblSeen = MG.lblSeen or {}
     local rem, ready
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
@@ -344,23 +341,35 @@ MG.timerSec = function()
                     if tostring_(d.ClassName) == "TextLabel" then
                         local t; pcall_(function() t = d.Text end)
                         t = tostring_(t or "")
-                        if t:upper():find("READY") then
+                        -- v18.19: READY - только ТОЧНОЕ совпадение текста.
+                        -- find("READY") цеплял декорации трассы ("GET READY") ->
+                        -- вечный READY и бесконечные ТП к скамейке (скрин).
+                        if (t:upper():gsub("[%s%p]", "")) == "READY" then
                             if MG.shown(d) then ready = true end
                         else
                             local hh, mm, ss = t:match("^%s*(%d+):(%d%d):(%d%d)%s*$")
-                            if hh and MG.shown(d) then
+                            if hh then
                                 local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
                                 -- v18.17: кулдаун минигейма - минуты; >2ч = чужой лейбл
                                 if r > 0 and r < 2 * 3600 then
-                                    local rec = MG.lblSeen[d]
+                                    -- v18.19: ключ свежести = GetFullName (строка).
+                                    -- Ключ-инстанс в Матче ненадёжен (обёртки могут
+                                    -- пересоздаваться на каждый GetDescendants) ->
+                                    -- запись "терялась" и живой тикающий таймер вечно
+                                    -- считался недоверенным -> rem не синкался ->
+                                    -- READY побеждал. Видимость (MG.shown) с таймера
+                                    -- тоже убрана: ложный Visible=false глушил живой
+                                    -- лейбл, а замороженные и так отсеит свежесть.
+                                    local k; pcall_(function() k = d:GetFullName() end)
+                                    k = k or nm
+                                    local rec = MG.lblSeen[k]
                                     if not rec then
                                         rec = { txt = t, t = 0, seen = now }   -- доверяем после первого тика
-                                        MG.lblSeen[d] = rec
+                                        MG.lblSeen[k] = rec
                                     elseif rec.txt ~= t then
                                         rec.txt = t
                                         -- тик засчитываем только при НЕПРЕРЫВНОМ наблюдении
-                                        -- (аудит: после паузы тоггла первое "изменение"
-                                        -- замороженного лейбла - не тик, ждём второй)
+                                        -- (после паузы тоггла первое "изменение" - не тик)
                                         rec.t = (now - rec.seen) <= 2.5 and now or 0
                                     end
                                     rec.seen = now
@@ -2553,12 +2562,15 @@ _wrap("auto-minigame", function()
                 if play then MG.click(play) end
                 local pos = MG.entryPos()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
+                local started = false
                 for _ = 1, 12 do
                     if not MG.active then break end
-                    if MG.findBtn("PICK") or MG.findBtn("CHEER") then break end   -- минигейм пошёл
+                    if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end   -- минигейм пошёл
                     keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
-                task_wait(0.3)
+                -- v18.19: вход не удался -> пауза подольше, чтобы не ТПшить
+                -- персонажа очередями, если READY оказался ложным/E не сработал
+                task_wait(started and 0.3 or 2)
             end)
         end
         task_wait(CFG.slow and 0.5 or 0.2)
