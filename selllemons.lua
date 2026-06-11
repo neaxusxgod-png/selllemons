@@ -73,6 +73,7 @@ local lemonFarmActive  = false
 local cashFarmActive   = true
 local autoStandActive  = false
 local autoDealActive   = true
+local autoRebirthActive = false
 local _standIsTapping  = false
 
 local buyBlacklist    = {}
@@ -146,7 +147,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.39 ===")
+print("=== SELL LEMONS v18.40 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -382,6 +383,8 @@ end
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Trading", "Lemon Labs", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }
+
+local RB = { mult = 2, lastPeek = 0, lastReb = 0, goSince = 0, expectUntil = nil, panel = nil, curStr = "", gainStr = "", curLog = nil, gainLog = nil, go = false, status = "off" }
 
 pcall_(function()
     if type(readfile) ~= "function" then return end
@@ -632,7 +635,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.39  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.40  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -651,6 +654,19 @@ if homesick then
         else
             CFG.vineBack = true
         end
+    end)
+
+    UIRef.t.AutoRebirth = right:addToggle("autoRebirth", "Auto Rebirth", false, function(val)
+        autoRebirthActive = val
+        if not val then RB.go = false; RB.status = "off"; RB.expectUntil = nil; RB.panel = nil end
+        print("[Hub] toggle AutoRebirth = " .. tostring_(val))
+    end)
+    pcall_(function()
+        UIRef.t.RebirthMult = right:addSlider("rebirthMult", "Rebirth at x (investors)", 2, 100, 2, function(val)
+            local m = mfloor(tonumber_(val) or 2)
+            if m < 2 then m = 2 elseif m > 100 then m = 100 end
+            RB.mult = m
+        end)
     end)
 
     UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
@@ -1894,6 +1910,7 @@ local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing
 local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx5 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 
 function LSM.findVine()
     local c = LSM.vineRef
@@ -2169,10 +2186,19 @@ local function pollInput()
                 pcall_(function() notify(mgName .. " is READY", "Sell Lemons", 4) end)
             end
         end
-        statusTx4.Position = Vec2(vx, sy)
+        statusTx4.Position = Vec2(vx, sy); sy = sy + 20
         statusTx4.Visible = true
     else
         statusTx4.Visible = false
+    end
+
+    if autoRebirthActive then
+        statusTx5.Text = "rebirth  |  " .. tostring_(RB.status or "...")
+        statusTx5.Color = RB.go and C3rgb(255, 226, 58) or C3rgb(222, 210, 170)
+        statusTx5.Position = Vec2(vx, sy); sy = sy + 20
+        statusTx5.Visible = true
+    else
+        statusTx5.Visible = false
     end
 end
 
@@ -2290,6 +2316,259 @@ _wrap("auto-deal", function()
             end)
         end
         task_wait(CFG.slow and 1.2 or 0.5)
+    end
+end)
+
+local _log10 = math.log10 or function(x) return math.log(x) / math.log(10) end
+local HUGE_EXP = {}
+do
+    local BASE = {[0]="thousand","million","billion","trillion","quadrillion","quintillion","sextillion","septillion","octillion","nonillion","decillion","undecillion","duodecillion","tredecillion","quattuordecillion","quindecillion","sexdecillion","septendecillion","octodecillion","novemdecillion"}
+    local ROOT = {[2]="vigintillion",[3]="trigintillion",[4]="quadragintillion",[5]="quinquagintillion",[6]="sexagintillion",[7]="septuagintillion",[8]="octogintillion",[9]="nonagintillion",[10]="centillion"}
+    local PREF = {[0]="",[1]="un",[2]="duo",[3]="tres",[4]="quattuor",[5]="quin",[6]="sex",[7]="septen",[8]="octo",[9]="novem"}
+    for m = 0, 19 do HUGE_EXP[BASE[m]] = (m + 1) * 3 end
+    for m = 20, 100 do
+        local nm = (PREF[m % 10] or "") .. (ROOT[m // 10] or "")
+        if nm ~= "" then HUGE_EXP[nm] = (m + 1) * 3 end
+    end
+end
+
+local function parseHugeLog(s)
+    if not s then return nil end
+    s = tostring_(s)
+    local mant, suf = s:match("([%d][%d%.,]*)%s*(%a+)")
+    if mant and suf then
+        local e = HUGE_EXP[suf:lower()]
+        if e then
+            local n = tonumber_((mant:gsub(",", "")))
+            if n and n > 0 then return _log10(n) + e end
+        end
+    end
+
+    local num = s:match("[%d][%d%.,]*")
+    if num then
+        local n = tonumber_((num:gsub(",", "")))
+        if n and n > 0 then return _log10(n) end
+    end
+    return nil
+end
+
+function RB.rootGui(d)
+    local cur = d
+    for _ = 1, 25 do
+        if not cur then return nil end
+        if tostring_(cur.ClassName) == "ScreenGui" then return cur end
+        local p; pcall_(function() p = cur.Parent end)
+        cur = p
+    end
+    return nil
+end
+
+function RB.shortStr(s)
+    if not s then return "?" end
+    local mant, suf = tostring_(s):match("([%d][%d%.,]*)%s*(%a+)")
+    if mant and suf then return mant .. " " .. suf end
+    return (tostring_(s):match("[%d][%d%.,]*")) or "?"
+end
+
+function RB.read()
+    local pg = getPlayerGui()
+    if not pg then return end
+    local curLog, gainLog, curStr, gainStr, open
+    local function consider(d)
+        if tostring_(d.ClassName) ~= "TextLabel" then return end
+        local t; pcall_(function() t = d.Text end)
+        t = tostring_(t or "")
+        if t == "" or not MG.shown(d) then return end
+        local low = t:lower()
+        if not low:find("investor") then return end
+        if (low:find("get") or low:find("rebirth to")) and not gainLog then
+            local g = parseHugeLog(t)
+            if g then gainLog = g; gainStr = t; open = true
+                if not RB.panel then RB.panel = RB.rootGui(d) end
+            end
+        elseif low:find("have") and not curLog then
+            local c = parseHugeLog(t)
+            if c then curLog = c; curStr = t end
+        end
+    end
+    local function scan(root)
+        pcall_(function()
+            for _, d in ipairs_(root:GetDescendants()) do
+                consider(d)
+                if curLog and gainLog then break end
+            end
+        end)
+    end
+    local cacheOk = false
+    pcall_(function() cacheOk = RB.panel and RB.panel.Parent and true or false end)
+    if cacheOk then scan(RB.panel) end
+    if not (curLog and gainLog) then
+        if not cacheOk then RB.panel = nil end
+        scan(pg)
+    end
+    return curLog, gainLog, curStr, gainStr, open
+end
+
+function RB.findBtn(wantWord, banList)
+    local pg = getPlayerGui()
+    if not pg then return nil end
+    local hit
+    pcall_(function()
+        for _, d in ipairs_(pg:GetDescendants()) do
+            local cn = tostring_(d.ClassName)
+            if (cn == "TextButton" or cn == "ImageButton") and MG.shown(d) then
+                local t = MG.text(d)
+                if t:find(wantWord) then
+                    local banned = false
+                    if banList then
+                        for _, b in ipairs_(banList) do if t:find(b) then banned = true; break end end
+                    end
+                    if not banned then
+                        local ap; pcall_(function() ap = d.AbsolutePosition end)
+                        if ap and (ap.X > 1 or ap.Y > 1) then hit = d; return end
+                    end
+                end
+            end
+        end
+    end)
+    return hit
+end
+
+function RB.findAlien()
+    local pg = getPlayerGui()
+    if not pg then return nil end
+    local hit, hx
+    pcall_(function()
+        for _, d in ipairs_(pg:GetDescendants()) do
+            local cn = tostring_(d.ClassName)
+            if (cn == "ImageButton" or cn == "TextButton") and MG.shown(d) then
+                local nm = tostring_(d.Name):lower()
+                local t = MG.text(d):lower()
+                if nm:find("alien") or nm:find("investor") or nm:find("rebirth")
+                   or t:find("alien") or t:find("investor") then
+                    local ap; pcall_(function() ap = d.AbsolutePosition end)
+                    if ap and (ap.X > 1 or ap.Y > 1) and (not hx or ap.X > hx) then
+                        hx = ap.X; hit = d
+                    end
+                end
+            end
+        end
+    end)
+    return hit
+end
+
+function RB.closePanel()
+    local b = RB.findBtn("CLOSE", {"REBIRTH"})
+    if not b then
+        local pg = getPlayerGui()
+        if pg then
+            pcall_(function()
+                for _, d in ipairs_(pg:GetDescendants()) do
+                    local cn = tostring_(d.ClassName)
+                    if (cn == "ImageButton" or cn == "TextButton") and MG.shown(d) then
+                        local nm = tostring_(d.Name):lower()
+                        if nm == "x" or nm == "close" or nm == "exit" or nm:find("close") then
+                            local ap; pcall_(function() ap = d.AbsolutePosition end)
+                            if ap and (ap.X > 1 or ap.Y > 1) then b = d; return end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    if b then MG.click(b) end
+    RB.panel = nil
+end
+
+function RB.doRebirth()
+    local rb = RB.findBtn("REBIRTH", {"FREE", "GET", "TO GET"})
+    if not rb then RB.status = "REBIRTH-кнопка не найдена"; rprint("[Rebirth] panel REBIRTH button not found"); return end
+    MG.click(rb)
+    task_wait(0.7)
+    local cf = RB.findBtn("REBIRTH", {"FREE", "GET", "TO GET"})
+    if cf then
+        MG.click(cf)
+        RB.lastReb = tick_()
+        RB.lastPeek = tick_()
+        RB.goSince = 0
+        RB.panel = nil
+        RB.go = false
+        RB.status = "REBIRTHED!"
+        rprint("[Rebirth] confirmed (x" .. tostring_(RB.mult) .. ")")
+    else
+        RB.status = "подтверждение не найдено"
+        rprint("[Rebirth] REBIRTH clicked, confirm popup not found")
+    end
+end
+
+function RB.tick()
+
+    local rmb = false
+    pcall_(function() if type(ismouse2pressed) == "function" then rmb = ismouse2pressed() end end)
+    if rmb or not _windowFocused() then return end
+    local now = tick_()
+    if (now - (RB.lastReb or 0)) < 30 then RB.go = false; RB.status = "ребитнулись, кулдаун"; return end
+
+    local cacheOk = false
+    pcall_(function() cacheOk = RB.panel and RB.panel.Parent and true or false end)
+    local expecting = RB.expectUntil and now < RB.expectUntil
+    if not (cacheOk or expecting) then
+
+        if (now - (RB.lastPeek or 0)) >= 40 then
+            RB.lastPeek = now
+            local a = RB.findAlien()
+            if a then
+                MG.click(a); RB.expectUntil = now + 6; RB.status = "открываю панель..."
+            else
+                RB.status = "кнопка инопланетянина не найдена"; rprint("[Rebirth] alien button not found")
+            end
+        else
+            RB.go = false
+            RB.status = sformat("x%d  |  проверка через %dс", RB.mult or 2, mfloor(40 - (now - (RB.lastPeek or 0))))
+        end
+        return
+    end
+
+    local curLog, gainLog, curStr, gainStr, open = RB.read()
+    if open and gainLog then
+        RB.expectUntil = nil
+        local mult = RB.mult or 2
+        RB.curLog, RB.gainLog = curLog, gainLog
+        RB.curStr = curStr or RB.curStr
+        RB.gainStr = gainStr or RB.gainStr
+        local go = false
+        if curLog then
+            go = gainLog >= (_log10(math.max(1, mult - 1)) + curLog)
+        end
+        RB.go = go
+        RB.status = sformat("x%d  |  +%s  %s", mult, RB.shortStr(gainStr), go and "-> GO" or "(жду)")
+        if go then
+
+            if (RB.goSince or 0) == 0 then RB.goSince = now end
+            if (now - RB.goSince) >= 1.6 then RB.doRebirth() end
+        else
+            RB.goSince = 0
+            RB.closePanel()
+            RB.lastPeek = now
+        end
+    else
+
+        if expecting then
+            RB.status = "открываю панель..."
+        else
+            RB.panel = nil
+            RB.go = false
+        end
+    end
+end
+_wrap("auto-rebirth", function()
+    while ScriptActive do
+        if autoRebirthActive then
+            pcall_(RB.tick)
+        else
+            RB.go = false
+        end
+        task_wait(CFG.slow and 1.4 or 0.8)
     end
 end)
 
@@ -2568,16 +2847,20 @@ _wrap("auto-minigame", function()
                 end
 
                 if not MG.miniEnd then
-                    local synced = false
+                    local synced, racing = false, false
                     for _ = 1, 6 do
                         if not MG.active then break end
                         MG.tsT = 0
                         local cd2 = MG.timerSec()
                         if cd2 and cd2 > 0 then MG.miniEnd = tick_() + cd2; synced = true; break end
-                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then break end
+                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then racing = true; break end
                         task_wait(0.5)
                     end
-                    if synced then task_wait(0.5); return end
+                    if synced or racing then task_wait(0.3); return end
+                end
+
+                if MG.findBtn("PICK") or MG.findBtn("CHEER") or MG.findBtn("EXIT") then
+                    task_wait(0.4); return
                 end
 
                 if (tick_() - (MG.lastEntryTry or 0)) < 6 then task_wait(0.5); return end
@@ -2656,4 +2939,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.39 loaded")
+rprint("sell lemons v18.40 loaded")
