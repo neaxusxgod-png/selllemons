@@ -41,6 +41,8 @@ end
 if not player then warn("[Hub] No LocalPlayer"); return end
 if not camera then camera = Workspace.CurrentCamera end
 
+local GuiService; pcall_(function() GuiService = game:GetService("GuiService") end)
+
 setrobloxinput(true)
 
 local mouse = nil
@@ -144,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.30 ===")
+print("=== SELL LEMONS v18.31 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -232,28 +234,38 @@ function FX.apply()
             end
         end)
 
+        local skipSet = {}
+        pcall_(function()
+            local ch = player.Character
+            if ch then
+                skipSet[ch] = true
+                for _, pp in ipairs_(ch:GetDescendants()) do skipSet[pp] = true end
+            end
+        end)
         local desc
         pcall_(function() desc = Workspace:GetDescendants() end)
         if desc then
             local i = 1
             while i <= #desc and FX.on and FX.gen == gen and ScriptActive do
                 local ok = pcall_(function()
-                    local stop = i + 200
+                    local stop = i + 600
                     while i <= #desc and i < stop do
                         local d = desc[i]
-                        local cn = tostring_(d.ClassName)
-                        if cn == "ParticleEmitter" or cn == "Trail" or cn == "Beam"
-                           or cn == "Smoke" or cn == "Fire" or cn == "Sparkles" then
-                            FX.set(d, "Enabled", false)
-                        elseif cn == "Decal" or cn == "Texture" then
-                            FX.set(d, "Transparency", 1)
-                        else
-                            local isPart = false
-                            pcall_(function() isPart = d:IsA("BasePart") end)
-                            if isPart then
-                                if FX_PLASTIC then FX.set(d, "Material", FX_PLASTIC) end
-                                FX.set(d, "CastShadow", false)
-                                FX.set(d, "Reflectance", 0)
+                        if not skipSet[d] then
+                            local cn = tostring_(d.ClassName)
+                            if cn == "ParticleEmitter" or cn == "Trail" or cn == "Beam"
+                               or cn == "Smoke" or cn == "Fire" or cn == "Sparkles" then
+                                FX.set(d, "Enabled", false)
+                            elseif cn == "Decal" or cn == "Texture" then
+                                FX.set(d, "Transparency", 1)
+                            else
+                                local isPart = false
+                                pcall_(function() isPart = d:IsA("BasePart") end)
+                                if isPart then
+                                    if FX_PLASTIC then FX.set(d, "Material", FX_PLASTIC) end
+                                    FX.set(d, "CastShadow", false)
+                                    FX.set(d, "Reflectance", 0)
+                                end
                             end
                         end
                         i = i + 1
@@ -568,7 +580,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.31  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -576,6 +588,9 @@ if homesick then
 
     UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
         MG.active = val
+        if not val then
+            MG.sessExit = 0; MG.sessCheck = 0; MG.exitSeen = false; MG.popupSeen = false
+        end
         S.saveState()
         print("[Hub] toggle AutoMinigame = " .. tostring_(val))
     end)
@@ -867,6 +882,16 @@ local function getLemonsFast()
         end
     end
     return temp
+end
+
+local _pGui
+local function getPlayerGui()
+    local pg = _pGui
+    if not pg or not pg.Parent then
+        pcall_(function() pg = player:FindFirstChildOfClass("PlayerGui") end)
+        _pGui = pg
+    end
+    return pg
 end
 
 local _cashFolder
@@ -2166,7 +2191,7 @@ _wrap("auto-deal", function()
     while ScriptActive do
         if autoDealActive then
             pcall_(function()
-                local pg = player:FindFirstChildOfClass("PlayerGui")
+                local pg = getPlayerGui()
                 if not pg then return end
                 local phone = pg:FindFirstChild("Phone")
                 if not phone then return end
@@ -2206,7 +2231,7 @@ _wrap("auto-deal", function()
                 pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
                 if apos and asz then
                     local inset = 0
-                    pcall_(function() inset = game:GetService("GuiService"):GetGuiInset().Y end)
+                    pcall_(function() if GuiService then inset = GuiService:GetGuiInset().Y end end)
                     local bx = mfloor(apos.X + asz.X / 2)
                     local by = mfloor(apos.Y + asz.Y / 2 + inset)
                     local ox, oy = S.mx, S.my
@@ -2281,7 +2306,7 @@ function MG.scanBtns(root, want, needPos)
 end
 local MG_CONTAINERS = {"MinigameRace", "PickGui", "PromptGui"}
 function MG.findBtn(want, needPos)
-    local pg = player:FindFirstChildOfClass("PlayerGui")
+    local pg = getPlayerGui()
     if not pg then return nil end
     for _, nm in ipairs_(MG_CONTAINERS) do
         local g
@@ -2400,7 +2425,7 @@ function MG.spamCheer(btn)
 end
 
 function MG.resultUp()
-    local pg = player:FindFirstChildOfClass("PlayerGui")
+    local pg = getPlayerGui()
     local mr = pg and pg:FindFirstChild("MinigameRace")
     if not mr then return false end
     local found = false
@@ -2416,7 +2441,7 @@ function MG.resultUp()
     return found
 end
 function MG.checkUp()
-    local pg = player:FindFirstChildOfClass("PlayerGui")
+    local pg = getPlayerGui()
     local popup = pg and pg:FindFirstChild("Popup")
     local chk = popup and popup:FindFirstChild("Check")
     return (chk and MG.shown(chk)) or false
@@ -2429,7 +2454,7 @@ function MG.clickCheck()
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
 
     pcall_(function()
-        local pg = player:FindFirstChildOfClass("PlayerGui")
+        local pg = getPlayerGui()
         local popup = pg and pg:FindFirstChild("Popup")
         local chk = popup and popup:FindFirstChild("Check")
         if not chk then return end
@@ -2466,46 +2491,53 @@ _wrap("auto-minigame", function()
                 local cheer = MG.findBtn("CHEER")
                 if cheer then
                     LSM.standBusyT = tick_()
-                    MG.exitTries = 0
-                    MG.checkTries = 0
+                    MG.sessExit = 0; MG.sessCheck = 0
                     MG.spamCheer(cheer)
-                    MG.raceEndT = tick_()
                     return
                 end
 
                 local exitBtn = MG.findBtn("EXIT")
-                local justRaced = (tick_() - (MG.raceEndT or 0)) < 15
-
-                if not justRaced then
-                    local pg = player:FindFirstChildOfClass("PlayerGui")
-                    local mr = pg and pg:FindFirstChild("MinigameRace")
-                    if mr and MG.scanBtns(mr, "EXIT") then
-                        MG.raceEndT = tick_(); MG.exitTries = 0; MG.checkTries = 0
-                        justRaced = true
+                if exitBtn then
+                    MG.sessExit = (MG.sessExit or 0) + 1
+                    MG.exitSeen = true
+                    if MG.sessExit <= 6 then
+                        LSM.standBusyT = tick_()
+                        MG.click(exitBtn)
+                        task_wait(0.35)
+                    else
+                        task_wait(0.5)
                     end
+                    return
+                elseif MG.exitSeen then
+                    MG.sessExit = 0; MG.exitSeen = false
                 end
 
-                if justRaced and (MG.exitTries or 0) < 3 then
-                    LSM.standBusyT = tick_()
-                    MG.exitTries = (MG.exitTries or 0) + 1
-                    if exitBtn then MG.click(exitBtn) end
-                    MG.clickRatio(0.5, 0.80); MG.clickRatio(0.5, 0.86); MG.clickRatio(0.5, 0.91)
-                    task_wait(0.35)
+                local popUp = false
+                pcall_(function()
+                    local pg = getPlayerGui()
+                    local popup = pg and pg:FindFirstChild("Popup")
+                    if popup then
+                        local en; pcall_(function() en = popup.Enabled end)
+                        if en ~= false and popup:FindFirstChild("Check") then popUp = true end
+                    end
+                end)
+                if popUp then
+                    MG.sessCheck = (MG.sessCheck or 0) + 1
+                    MG.popupSeen = true
+                    if MG.sessCheck <= 6 then
+                        LSM.standBusyT = tick_()
+                        MG.clickCheck()
+                        task_wait(0.35)
+                    else
+                        task_wait(0.5)
+                    end
                     return
-                end
-
-                if justRaced and (MG.exitTries or 0) >= 3 and (MG.checkTries or 0) < 3 then
-                    LSM.standBusyT = tick_()
-                    MG.checkTries = (MG.checkTries or 0) + 1
-                    MG.clickCheck()
-                    task_wait(0.35)
-                    return
+                elseif MG.popupSeen then
+                    MG.sessCheck = 0; MG.popupSeen = false
                 end
 
                 if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
-                    MG.exitTries = 0
-                    MG.checkTries = 0
                     MG.clickSlots()
                     task_wait(0.4)
                     return
@@ -2613,4 +2645,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.30 loaded")
+rprint("sell lemons v18.31 loaded")
