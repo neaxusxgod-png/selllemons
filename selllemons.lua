@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.20 — минигейм: чек забран -> сразу стоп (убраны 5с лишних кликов) ]] --
+-- [[ SELL LEMONS v18.21 — минигейм: чек = один клик и СТОП (курсор больше не дёргается), EXIT не жмём пока чек на экране ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.20 ===")
+print("=== SELL LEMONS v18.21 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -2523,8 +2523,11 @@ _wrap("auto-minigame", function()
                 -- v18.15: ВИДИМАЯ кнопка EXIT срабатывает и без justRaced (если
                 -- CHEER-фаза была пропущена, гонку всё равно надо закрыть);
                 -- ненадёжный resultUp остаётся под защитой justRaced.
-                local exitBtn = (MG.exitTries or 0) < 6 and MG.findBtn("EXIT") or nil
-                if (MG.exitTries or 0) < 6 and (exitBtn or (justRaced and MG.resultUp())) then
+                -- v18.21: как только появился ЧЕК - EXIT больше НЕ жмём (и не
+                -- двигаем курсор по высотам), сразу к ветке чека. И чек уже
+                -- забран (checkDone) - тоже стоп.
+                local exitBtn = (not MG.checkDone) and (MG.exitTries or 0) < 6 and MG.findBtn("EXIT") or nil
+                if not MG.checkDone and not MG.checkUp() and (MG.exitTries or 0) < 6 and (exitBtn or (justRaced and MG.resultUp())) then
                     LSM.standBusyT = tick_()
                     MG.exitTries = (MG.exitTries or 0) + 1
                     if not justRaced then MG.raceEndT = tick_() - 30 end   -- короткое окно (10с) для чека
@@ -2533,24 +2536,24 @@ _wrap("auto-minigame", function()
                     task_wait(0.6)
                     return
                 end
-                -- 3) ЧЕК на экране -> клик. v18.20: как только чек ИСЧЕЗ (забрали) -
-                -- СРАЗУ конец пост-гонки, без лишних ~5с долбёжки (оператор:
-                -- "ещё 5 секунд лишних пытается кликнуть"). checkUp в Матче мог
-                -- ложно держать "виден" -> раньше шло до 6 попыток x0.8с.
-                if justRaced and not MG.checkDone and (MG.checkTries or 0) < 3 and MG.checkUp() then
+                -- 3) ЧЕК на экране -> ОДИН проход кликов и СТОП. clickCheck бьёт
+                -- 4 раза (2 по чеку + 2 в центр) - этого хватает забрать. На
+                -- checkUp, чтобы понять "забрал", полагаться НЕЛЬЗЯ: .Visible в
+                -- Матче врёт и держит "виден" -> курсор ещё дёргался (жалоба).
+                -- Поэтому кликнули раз -> checkDone, и БОЛЬШЕ ни курсора, ни
+                -- кликов до новой гонки (checkDone снимается на новом PICK/CHEER).
+                if justRaced and not MG.checkDone and MG.checkUp() then
                     LSM.standBusyT = tick_()
-                    MG.checkTries = (MG.checkTries or 0) + 1
                     MG.clickCheck()
-                    task_wait(0.2)
-                    if not MG.checkUp() then
-                        MG.checkDone = true   -- чек забрали -> больше не кликаем
-                        MG.raceEndT = 0       -- justRaced=false -> хвост обрывается, идём на кулдаун
-                    end
+                    MG.checkDone = true
+                    MG.raceEndT = 0       -- justRaced=false -> хвост обрывается, идём на кулдаун
                     return
                 end
                 -- 4) ВЫБОР: PICK (билборды) -> клик по экранным долям
                 if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
+                    MG.checkDone = false   -- новая гонка началась -> снова можно забрать чек
+                    MG.exitTries = 0
                     MG.clickSlots()
                     task_wait(0.4)
                     return
@@ -2647,4 +2650,4 @@ end
 
 -- v18.19: версия в видимом логе - чтобы было видно, что raw-кэш GitHub (~5 мин)
 -- отдал СВЕЖИЙ скрипт, а не старый
-rprint("sell lemons v18.20 loaded")
+rprint("sell lemons v18.21 loaded")
