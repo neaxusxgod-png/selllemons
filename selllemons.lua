@@ -144,7 +144,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.28 ===")
+print("=== SELL LEMONS v18.29 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -394,7 +394,7 @@ MG.timerSec = function()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
 
-            if MG.enabled[nm] ~= false and not nm:lower():find("trade") then
+            if MG.enabled[nm] ~= false and nm:lower():find("minigame") and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "TextLabel" then
                         local t; pcall_(function() t = d.Text end)
@@ -449,7 +449,8 @@ MG.name = function()
             pcall_(function()
                 for _, c in ipairs_(mg:GetChildren()) do
                     local cn = tostring_(c.Name)
-                    if MG.enabled[cn] ~= false and not cn:lower():find("trade") then
+
+                    if MG.enabled[cn] ~= false and cn:lower():find("minigame") and not cn:lower():find("trade") then
                         for _, d in ipairs_(c:GetDescendants()) do
                             if tostring_(d.ClassName) == "ProximityPrompt" then
                                 local ot; pcall_(function() ot = d.ObjectText end)
@@ -2308,7 +2309,7 @@ function MG.entryPos()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
 
-            if MG.enabled[nm] ~= false and not nm:lower():find("trade") then
+            if MG.enabled[nm] ~= false and nm:lower():find("minigame") and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
                         pos = _standPartPos(d.Parent); return
@@ -2516,8 +2517,15 @@ _wrap("auto-minigame", function()
                     if synced then task_wait(0.5); return end
                 end
 
-                LSM.standBusyT = tick_()
                 local pos = MG.entryPos()
+                local near = false
+                pcall_(function()
+                    local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if h and pos then near = (h.Position - pos).Magnitude < 40 end
+                end)
+                local expired = MG.miniEnd and (MG.miniEnd - tick_()) <= 0
+                if not (near or expired) then task_wait(0.5); return end
+                LSM.standBusyT = tick_()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
                 local started = false
                 local play = MG.findBtn("PLAY", true)
@@ -2590,4 +2598,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.28 loaded")
+rprint("sell lemons v18.29 loaded")
