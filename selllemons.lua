@@ -144,7 +144,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.24 ===")
+print("=== SELL LEMONS v18.25 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -388,7 +388,8 @@ MG.timerSec = function()
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
-            if MG.enabled[nm] ~= false then
+
+            if MG.enabled[nm] ~= false and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "TextLabel" then
                         local t; pcall_(function() t = d.Text end)
@@ -2304,6 +2305,12 @@ function MG.clickRatio(fx, fy)
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
 
+function MG.tap()
+    pcall_(function() mouse1press() end)
+    task_wait()
+    pcall_(function() mouse1release() end)
+end
+
 function MG.spamCheer(btn)
 
     local vw, vh = 1920, 1080
@@ -2316,7 +2323,7 @@ function MG.spamCheer(btn)
     local tCap = tick_()
     while MG.active and ScriptActive and (tick_() - tCap) < 75 do
         LSM.lastBot = tick_()
-        pcall_(function() mouse1press(); mouse1release() end)
+        MG.tap()
         n = n + 1
         if n % 8 == 0 then
             local ok, still = pcall_(function() return btn.Parent and MG.text(btn):find("CHEER") end)
@@ -2324,8 +2331,7 @@ function MG.spamCheer(btn)
             pcall_(function() mousemoveabs(cx, cy) end)
             LSM.standBusyT = tick_()
         end
-        task_wait(0.05)
-
+        task_wait(0.02)
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
@@ -2445,18 +2451,35 @@ _wrap("auto-minigame", function()
                     return
                 end
 
+                if not MG.miniEnd and (tick_() - (MG.lastEntryTry or 0)) < 25 then
+                    task_wait(0.5)
+                    return
+                end
+                MG.lastEntryTry = tick_()
+
                 LSM.standBusyT = tick_()
-                local play = MG.findBtn("PLAY", true)
-                if play then MG.click(play) end
                 local pos = MG.entryPos()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
-                local started = false
-                for _ = 1, 12 do
+                local onCd, started = false, false
+                for _ = 1, 5 do
                     if not MG.active then break end
+                    LSM.standBusyT = tick_()
+                    MG.tsT = 0
+                    local cdNear = MG.timerSec()
+                    if cdNear and cdNear > 0 then MG.miniEnd = tick_() + cdNear; onCd = true; break end
                     if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end
-                    keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
+                    task_wait(0.4)
                 end
-
+                if onCd then task_wait(0.5); return end
+                if not started then
+                    local play = MG.findBtn("PLAY", true)
+                    if play then MG.click(play) end
+                    for _ = 1, 12 do
+                        if not MG.active then break end
+                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end
+                        keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
+                    end
+                end
                 task_wait(started and 0.3 or 2)
             end)
         end
@@ -2520,4 +2543,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.24 loaded")
+rprint("sell lemons v18.25 loaded")
