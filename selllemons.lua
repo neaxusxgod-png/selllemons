@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.19 — фикс вечного READY минигейма (точный READY + ключ свежести по имени) ]] --
+-- [[ SELL LEMONS v18.20 — минигейм: чек забран -> сразу стоп (убраны 5с лишних кликов) ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.19 ===")
+print("=== SELL LEMONS v18.20 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -2508,6 +2508,7 @@ _wrap("auto-minigame", function()
                     LSM.standBusyT = tick_()
                     MG.exitTries = 0   -- новая гонка -> сбрасываем счётчики попыток
                     MG.checkTries = 0
+                    MG.checkDone = false
                     MG.spamCheer(cheer)
                     MG.raceEndT = tick_()   -- гонка только что закончилась
                     return
@@ -2532,12 +2533,19 @@ _wrap("auto-minigame", function()
                     task_wait(0.6)
                     return
                 end
-                -- 3) ЧЕК на экране -> клик (макс 6 раз за гонку)
-                if justRaced and (MG.checkTries or 0) < 6 and MG.checkUp() then
+                -- 3) ЧЕК на экране -> клик. v18.20: как только чек ИСЧЕЗ (забрали) -
+                -- СРАЗУ конец пост-гонки, без лишних ~5с долбёжки (оператор:
+                -- "ещё 5 секунд лишних пытается кликнуть"). checkUp в Матче мог
+                -- ложно держать "виден" -> раньше шло до 6 попыток x0.8с.
+                if justRaced and not MG.checkDone and (MG.checkTries or 0) < 3 and MG.checkUp() then
                     LSM.standBusyT = tick_()
                     MG.checkTries = (MG.checkTries or 0) + 1
                     MG.clickCheck()
-                    task_wait(0.6)
+                    task_wait(0.2)
+                    if not MG.checkUp() then
+                        MG.checkDone = true   -- чек забрали -> больше не кликаем
+                        MG.raceEndT = 0       -- justRaced=false -> хвост обрывается, идём на кулдаун
+                    end
                     return
                 end
                 -- 4) ВЫБОР: PICK (билборды) -> клик по экранным долям
@@ -2639,4 +2647,4 @@ end
 
 -- v18.19: версия в видимом логе - чтобы было видно, что raw-кэш GitHub (~5 мин)
 -- отдал СВЕЖИЙ скрипт, а не старый
-rprint("sell lemons v18.19 loaded")
+rprint("sell lemons v18.20 loaded")
