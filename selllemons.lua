@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.33 ===")
+print("=== SELL LEMONS v18.34 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -590,7 +590,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.33  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.34  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -1285,20 +1285,6 @@ _wrap("autobuy-worker", function()
             totalFailed = totalFailed + 1
             print("[Worker] retry-later: " .. key .. " | n=" .. (buyAttempt[key] and buyAttempt[key].n or 0))
 
-            local a = buyAttempt[key]
-            if a and a.n >= 6 and not isGreyedOut(btn) then
-                a.n = 0
-                task_spawn(function()
-                    pcall_(function()
-                        local model = btn.Parent
-                        local pf = model and model:FindFirstChild("Purchase")
-                        if pf and tostring_(pf.ClassName) == "RemoteFunction" then
-                            pf:InvokeServer(false)
-                            rprint("[Worker] Purchase remote rescue: " .. key)
-                        end
-                    end)
-                end)
-            end
         end
 
         if totalBought % 20 == 0 then
@@ -2234,21 +2220,6 @@ _wrap("auto-deal", function()
                 end
                 if not best or isReject(btnText(best)) then return end
 
-                local fired = false
-                pcall_(function()
-                    local rem = myTycoon and myTycoon:FindFirstChild("Remotes")
-                    local po = rem and rem:FindFirstChild("PhoneOffer")
-                    if po and tostring_(po.ClassName) == "RemoteEvent" then
-                        po:FireServer("Accept")
-                        fired = true
-                    end
-                end)
-                if fired then
-                    rprint("[Deal] accepted via remote")
-                    task_wait(1)
-                    return
-                end
-
                 local rmb = false
                 pcall_(function() if type(ismouse2pressed) == "function" then rmb = ismouse2pressed() end end)
                 if rmb or not _windowFocused() then return end
@@ -2661,4 +2632,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.33 loaded")
+rprint("sell lemons v18.34 loaded")
