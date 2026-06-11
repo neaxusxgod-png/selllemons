@@ -2637,4 +2637,6 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons loaded")
+-- v18.19: версия в видимом логе - чтобы было видно, что raw-кэш GitHub (~5 мин)
+-- отдал СВЕЖИЙ скрипт, а не старый
+rprint("sell lemons v18.19 loaded")
