@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.35 ===")
+print("=== SELL LEMONS v18.36 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -564,25 +564,25 @@ if homesick then
     local tab1 = window:addTab("Main")
     local left = tab1:addSection("Farming", "Left")
 
-    UIRef.t.AutoBuy = left:addToggle("autoBuy", "🛒 Auto Buy", false, function(val)
+    UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
         autoBuyActive = val
         S.saveState()
         print("[Hub] toggle AutoBuy = " .. tostring_(val))
     end):addKeybind("1", "Toggle", true, function() end)
 
-    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "🍋 Lemon Farm", false, function(val)
+    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
         lemonFarmActive = val
         S.saveState()
         print("[Hub] toggle LemonFarm = " .. tostring_(val))
     end):addKeybind("2", "Toggle", true, function() end)
 
-    UIRef.t.AutoStand = left:addToggle("autoStand", "🏪 Auto Stand", false, function(val)
+    UIRef.t.AutoStand = left:addToggle("autoStand", "Auto Stand", false, function(val)
         autoStandActive = val
         S.saveState()
         print("[Hub] toggle AutoStand = " .. tostring_(val))
     end):addKeybind("3", "Toggle", true, function() end)
 
-    UIRef.t.CashFarm = left:addToggle("cashFarm", "💰 Cash Farm", true, function(val)
+    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Farm", true, function(val)
         cashFarmActive = val
         S.saveState()
         print("[Hub] toggle CashFarm = " .. tostring_(val))
@@ -590,13 +590,13 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("🍋 Sell Lemons v18.35  |  by neaxus") end)
-    UIRef.t.AutoDeal = right:addToggle("autoDeal", "📱 Auto Deal", true, function(val)
+    pcall_(function() window:setBadge("Sell Lemons v18.36  |  by neaxus") end)
+    UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
     end)
 
-    UIRef.t.AutoMini = right:addToggle("autoMini", "🎮 Auto Minigame", false, function(val)
+    UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
         MG.active = val
         if not val then
             MG.sessExit = 0; MG.sessCheck = 0; MG.exitSeen = false; MG.popupSeen = false
@@ -605,7 +605,7 @@ if homesick then
         print("[Hub] toggle AutoMinigame = " .. tostring_(val))
     end)
 
-    UIRef.t.CashVine = right:addToggle("cashVine", "🌿 Cash Vine TP", false, function(val)
+    UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
         if val then
             CFG.vineGo = true
         else
@@ -613,14 +613,14 @@ if homesick then
         end
     end)
 
-    UIRef.t.FpsSave = right:addToggle("fpsSave", "⚡ FPS Save (weak PC)", false, function(val)
+    UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
         CFG.slow = val and true or false
         if val then FX.apply() else FX.restore() end
     end)
 
     pcall_(function() right:addSeparator() end)
 
-    UIRef.t.StopAll = right:addToggle("stopAll", "🛑 Stop All", false, function(val)
+    UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
         if val then
             stopAll()
             task.delay(0.1, function()
@@ -2632,4 +2632,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.35 loaded")
+rprint("sell lemons v18.36 loaded")
