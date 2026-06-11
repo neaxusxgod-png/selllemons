@@ -635,7 +635,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v19  |  by neaxus & Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v19  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -1615,7 +1615,7 @@ local function processLemon(v, hrp)
     if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
 
     if not _windowFocused() then return false end
-    if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then return false end
+    if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 then return false end
 
     local origSize, origTransp, origCanColl = nil, nil, nil
     local hitboxApplied = false
@@ -1713,7 +1713,7 @@ local function processSnapshot(snapshot, hrp)
         if not lemonFarmActive then break end
         if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
         if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
-        if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then break end
+        if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 then break end
         local fruits = groups[tree]
         local excludeSet = {}
         for i = 1, #fruits do excludeSet[fruits[i]] = true end
@@ -1729,7 +1729,7 @@ local function processSnapshot(snapshot, hrp)
             if not lemonFarmActive then break end
             if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
             if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
-            if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then break end
+            if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 then break end
             local v = fruits[i]
             if v and v:IsDescendantOf(Workspace) then
                 local lk    = lemonKey(v)
@@ -1801,7 +1801,7 @@ _wrap("lemon-farm", function()
             LSM.annAfk = false
             LSM.returnHome()
         end
-        local standBusy = autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4
+        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow then
 
             if not LSM.zoomedIn then
@@ -2054,6 +2054,8 @@ local function pollInput()
             txt = "lemon farm  |  paused: auto buy working"
         elseif autoStandActive and (nowA - (LSM.standBusyT or 0)) < 4 then
             txt = "lemon farm  |  paused: auto stand working"
+        elseif (nowA - (RB.busyT or 0)) < 4 then
+            txt = "lemon farm  |  paused: rebirth working"
         else
             local idleT = nowA - (S.lastUser or 0)
             if idleT < CFG.afkDelay then
@@ -2434,10 +2436,12 @@ end
 function RB.doRebirth(g)
     local rb = RB.node(g, "InvestorsMenu/Body/Rebirth")
     if not rb then RB.status = "REBIRTH button not found"; rprint("[Rebirth] panel REBIRTH button missing"); return end
+    RB.busyT = tick_()
     MG.click(rb)
     local cf
     for _ = 1, 8 do
         task_wait(0.5)
+        RB.busyT = tick_()
         if RB.alertMsg():upper():find("REBIRTH") then cf = RB.findConfirm() end
         if cf then break end
     end
@@ -2452,6 +2456,7 @@ function RB.doRebirth(g)
     local done = false
     for i = 1, 2 do
         task_wait(1.2)
+        RB.busyT = tick_()
         local cashNow = RB.cashLog()
 
         if not cashBefore or not cashNow or cashNow < cashBefore - 3 then done = true; break end
@@ -2479,6 +2484,13 @@ function RB.tick()
     local now = tick_()
     if (now - (RB.lastReb or 0)) < 30 then RB.go = false; RB.status = "cooldown"; return end
 
+    local who
+    if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then who = "auto buy"
+    elseif autoStandActive and (now - (LSM.standBusyT or 0)) < 4 then who = "auto stand"
+    elseif MG.active and ((now - (MG.raceEndT or 0)) < 30 or (now - (MG.lastEntryTry or 0)) < 75) then who = "minigame"
+    end
+    if who then RB.go = false; RB.goSince = 0; RB.status = "waiting: " .. who; return end
+
     local g = RB.gui()
     if not g then RB.go = false; RB.status = "Rebirth gui not found"; return end
     local menu = RB.node(g, "InvestorsMenu")
@@ -2492,16 +2504,22 @@ function RB.tick()
     if not isOpen then
         RB.go = false
         if (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then
+
+            RB.busyT = now
+            if not RB.claimT or (now - RB.claimT) > 5 then RB.claimT = now; RB.status = "opening panel..."; return end
+            RB.claimT = nil
             RB.lastPeek = now
             local sb = RB.node(g, "Sidebar/Container/Investors")
             if sb then MG.click(sb); RB.openedAt = now; RB.status = "opening panel..."
             else RB.status = "Investors button not found"; rprint("[Rebirth] sidebar Investors missing") end
         else
+            RB.claimT = nil
             RB.status = "idle"
         end
         return
     end
 
+    RB.busyT = now
     local curT  = RB.text(RB.node(g, "InvestorsMenu/Body/Amount/Quantity"))
     local gainT = RB.text(RB.node(g, "InvestorsMenu/Body/Potential/Quantity"))
     local curLog, gainLog = parseHugeLog(curT), parseHugeLog(gainT)
@@ -2900,4 +2918,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v19 loaded  |  by neaxus & Inspecttor")
+rprint("sell lemons v19 loaded  |  by Inspecttor")
