@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.37 ===")
+print("=== SELL LEMONS v18.38 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -364,6 +364,22 @@ end
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Trading", "Lemon Labs", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }
+
+pcall_(function()
+    if type(readfile) == "function" then
+        local v = tonumber(readfile("selllemons_mini.txt"))
+
+        if v and v > tick_() - 24 * 3600 and v < tick_() + 2 * 3600 then MG.miniEnd = v end
+    end
+end)
+MG.saveMiniEnd = function()
+    if not MG.miniEnd then return end
+    if (tick_() - (MG.saveT or 0)) < 20 then return end
+    MG.saveT = tick_()
+    pcall_(function()
+        if type(writefile) == "function" then writefile("selllemons_mini.txt", tostring_(MG.miniEnd)) end
+    end)
+end
 
 S.saveState = function() end
 
@@ -590,7 +606,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.37  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.38  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -2116,7 +2132,7 @@ local function pollInput()
     local mgName = MG.name()
     if mgName then
         local cd = MG.timerSec()
-        if cd and cd > 0 then MG.miniEnd = tick_() + cd end
+        if cd and cd > 0 then MG.miniEnd = tick_() + cd; MG.saveMiniEnd() end
         local rem = MG.miniEnd and (MG.miniEnd - tick_()) or nil
         if rem and rem > 0 then
             statusTx4.Text = sformat("%s  |  %d:%02d", mgName, mfloor(rem / 60), mfloor(rem % 60))
@@ -2620,4 +2636,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.37 loaded")
+rprint("sell lemons v18.38 loaded")
