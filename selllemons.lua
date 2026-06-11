@@ -144,7 +144,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.26 ===")
+print("=== SELL LEMONS v18.27 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -186,6 +186,7 @@ function UX.fire(id)
 end
 
 local FX = { on = false, mods = {}, n = 0 }
+local FX_PLASTIC; pcall_(function() FX_PLASTIC = Enum.Material.Plastic end)
 function FX.set(inst, prop, val)
     pcall_(function()
         local old = inst[prop]
@@ -225,14 +226,10 @@ function FX.apply()
                 FX.set(tr, "WaterWaveSize", 0)
                 FX.set(tr, "WaterWaveSpeed", 0)
                 FX.set(tr, "WaterReflectance", 0)
+                FX.set(tr, "WaterTransparency", 1)
+                local cl; pcall_(function() cl = tr:FindFirstChildOfClass("Clouds") end)
+                if cl then FX.set(cl, "Cover", 0); FX.set(cl, "Density", 0) end
             end
-        end)
-
-        pcall_(function()
-            FX.set(settings().Rendering, "QualityLevel", Enum.QualityLevel.Level01)
-        end)
-        pcall_(function()
-            FX.set(UserSettings():GetService("UserGameSettings"), "SavedQualityLevel", Enum.SavedQualitySetting.QualityLevel1)
         end)
 
         local desc
@@ -241,7 +238,7 @@ function FX.apply()
             local i = 1
             while i <= #desc and FX.on and FX.gen == gen and ScriptActive do
                 local ok = pcall_(function()
-                    local stop = i + 400
+                    local stop = i + 200
                     while i <= #desc and i < stop do
                         local d = desc[i]
                         local cn = tostring_(d.ClassName)
@@ -250,6 +247,14 @@ function FX.apply()
                             FX.set(d, "Enabled", false)
                         elseif cn == "Decal" or cn == "Texture" then
                             FX.set(d, "Transparency", 1)
+                        else
+                            local isPart = false
+                            pcall_(function() isPart = d:IsA("BasePart") end)
+                            if isPart then
+                                if FX_PLASTIC then FX.set(d, "Material", FX_PLASTIC) end
+                                FX.set(d, "CastShadow", false)
+                                FX.set(d, "Reflectance", 0)
+                            end
                         end
                         i = i + 1
                     end
@@ -833,8 +838,13 @@ local function getLemonsFast()
     return temp
 end
 
+local _cashFolder
 local function getCashDropsFast()
-    local folder = Workspace:FindFirstChild("CashDrops")
+    local folder = _cashFolder
+    if not folder or not folder.Parent then
+        folder = Workspace:FindFirstChild("CashDrops")
+        _cashFolder = folder
+    end
     if not folder then return {} end
     local temp = {}
     for _, v in ipairs_(folder:GetDescendants()) do
@@ -2141,6 +2151,10 @@ _wrap("auto-deal", function()
                 end
                 if not best or isReject(btnText(best)) then return end
 
+                local rmb = false
+                pcall_(function() if type(ismouse2pressed) == "function" then rmb = ismouse2pressed() end end)
+                if rmb or not _windowFocused() then return end
+
                 local apos, asz
                 pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
                 if apos and asz then
@@ -2218,10 +2232,11 @@ function MG.scanBtns(root, want, needPos)
     end)
     return hit
 end
+local MG_CONTAINERS = {"MinigameRace", "PickGui", "PromptGui"}
 function MG.findBtn(want, needPos)
     local pg = player:FindFirstChildOfClass("PlayerGui")
     if not pg then return nil end
-    for _, nm in ipairs_({"MinigameRace", "PickGui", "PromptGui"}) do
+    for _, nm in ipairs_(MG_CONTAINERS) do
         local g
         pcall_(function() g = pg:FindFirstChild(nm) end)
         if g then
@@ -2274,13 +2289,15 @@ function MG.entryPos()
     return pos
 end
 
+local MG_PICK_ROWS = {0.74, 0.78, 0.82}
+local MG_PICK_COLS = {0.14, 0.35, 0.56, 0.78}
 function MG.clickSlots()
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
-    for _, fy in ipairs_({0.74, 0.78, 0.82}) do
-        for _, fx in ipairs_({0.14, 0.35, 0.56, 0.78}) do
+    for _, fy in ipairs_(MG_PICK_ROWS) do
+        for _, fx in ipairs_(MG_PICK_COLS) do
             if not MG.active then break end
             LSM.lastBot = tick_()
             pcall_(function()
@@ -2455,34 +2472,29 @@ _wrap("auto-minigame", function()
                     return
                 end
 
-                if not MG.miniEnd and (tick_() - (MG.lastEntryTry or 0)) < 25 then
-                    task_wait(0.5)
-                    return
+                if not MG.miniEnd then
+                    local synced = false
+                    for _ = 1, 6 do
+                        if not MG.active then break end
+                        MG.tsT = 0
+                        local cd2 = MG.timerSec()
+                        if cd2 and cd2 > 0 then MG.miniEnd = tick_() + cd2; synced = true; break end
+                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then break end
+                        task_wait(0.5)
+                    end
+                    if synced then task_wait(0.5); return end
                 end
-                MG.lastEntryTry = tick_()
 
                 LSM.standBusyT = tick_()
                 local pos = MG.entryPos()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
-                local onCd, started = false, false
-                for _ = 1, 5 do
+                local started = false
+                local play = MG.findBtn("PLAY", true)
+                if play then MG.click(play) end
+                for _ = 1, 12 do
                     if not MG.active then break end
-                    LSM.standBusyT = tick_()
-                    MG.tsT = 0
-                    local cdNear = MG.timerSec()
-                    if cdNear and cdNear > 0 then MG.miniEnd = tick_() + cdNear; onCd = true; break end
                     if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end
-                    task_wait(0.4)
-                end
-                if onCd then task_wait(0.5); return end
-                if not started then
-                    local play = MG.findBtn("PLAY", true)
-                    if play then MG.click(play) end
-                    for _ = 1, 12 do
-                        if not MG.active then break end
-                        if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end
-                        keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
-                    end
+                    keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
                 task_wait(started and 0.3 or 2)
             end)
@@ -2547,4 +2559,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.26 loaded")
+rprint("sell lemons v18.27 loaded")
