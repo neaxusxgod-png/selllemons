@@ -144,7 +144,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.29 ===")
+print("=== SELL LEMONS v18.30 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -1248,6 +1248,21 @@ _wrap("autobuy-worker", function()
             markBuyFail(key, btn)
             totalFailed = totalFailed + 1
             print("[Worker] retry-later: " .. key .. " | n=" .. (buyAttempt[key] and buyAttempt[key].n or 0))
+
+            local a = buyAttempt[key]
+            if a and a.n >= 6 and not isGreyedOut(btn) then
+                a.n = 0
+                task_spawn(function()
+                    pcall_(function()
+                        local model = btn.Parent
+                        local pf = model and model:FindFirstChild("Purchase")
+                        if pf and tostring_(pf.ClassName) == "RemoteFunction" then
+                            pf:InvokeServer()
+                            rprint("[Worker] Purchase remote rescue: " .. key)
+                        end
+                    end)
+                end)
+            end
         end
 
         if totalBought % 20 == 0 then
@@ -2598,4 +2613,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.29 loaded")
+rprint("sell lemons v18.30 loaded")
