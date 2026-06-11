@@ -1,8 +1,6 @@
--- [[ SELL LEMONS v18.23 — Cash Vine: детект по одному лейблу (VineKey пропал из игры), ClassName а не IsA ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
--- ==================== LOCAL CACHE (hot paths) ====================
 local mfloor, mabs            = math.floor, math.abs
 local msin                    = math.sin
 local tinsert                 = table.insert
@@ -21,16 +19,12 @@ local function clamp(x, a, b)
 end
 local function lerp(a, b, t) return a + (b - a) * t end
 
--- v11.1: РЕЛИЗ-РЕЖИМ. homesick показывает каждый print() тостом на экране —
--- для паблика всё глушим. DEBUG = true вернёт логи. rprint = настоящий print
--- (им пишутся только реальные ошибки и одно сообщение о загрузке).
 local DEBUG = false
 local rprint = print
 local print = function(...)
     if DEBUG then rprint(...) end
 end
 
--- ==================== INIT ====================
 local Players, RunService, Workspace, player, camera
 local initAttempts = 0
 while not player and initAttempts < 50 do
@@ -49,13 +43,9 @@ if not camera then camera = Workspace.CurrentCamera end
 
 setrobloxinput(true)
 
--- Cache del mouse (evita GetMouse() por frame)
 local mouse = nil
 pcall_(function() mouse = player:GetMouse() end)
 
--- ==================== ERROR REPORTS (v7.2) ====================
--- Любая ошибка в циклах больше не убивает корутину молча: печатается в
--- консоль с тегом, повторы схлопываются (x N), цикл перезапускается.
 local errCounts = {}
 local function reportErr(tag, err)
     local msg = "[" .. tag .. "] " .. tostring_(err)
@@ -69,27 +59,24 @@ local function _wrap(tag, fn)
     task_spawn(function()
         while ScriptActive do
             local ok, err = pcall_(fn)
-            if ok then break end          -- цикл завершился штатно
+            if ok then break end
             reportErr(tag, err)
-            task_wait(0.5)                -- и перезапускаем после ошибки
+            task_wait(0.5)
         end
     end)
 end
 
 local autoBuyActive    = false
 local lemonFarmActive  = false
-local cashFarmActive   = true    -- v13.3: включён по умолчанию
+local cashFarmActive   = true
 local autoStandActive  = false
-local autoDealActive   = true    -- v13.2: автопринятие сделок (телефон с Deal.)
-local _standIsTapping  = false   -- Gate: true while AutoStand is in E-tap phase
+local autoDealActive   = true
+local _standIsTapping  = false
 
 local buyBlacklist    = {}
 local failedButtons   = {}
-local buyAttempt      = {}   -- v5.19: [key] = {tries=, next=} backoff (reemplaza blacklist permanente)
+local buyAttempt      = {}
 
--- v18.15: ключ кэшируется по инстансу (кнопки статичны). Раньше каждый проход
--- очереди/скана читал Position и собирал строку заново - тысячи бридж-чтений
--- в секунду, на слабых ПК от этого лагало ВСЁ меню при автобае.
 local keyMemo = {}
 pcall_(function() setmetatable(keyMemo, { __mode = "k" }) end)
 local function getButtonKey(v)
@@ -110,15 +97,11 @@ local function resetBuyBlacklist()
     print("[Hub] Blacklist RESET!")
 end
 
--- v5.21: backoff temporal en vez de blacklist permanente por "2 fails".
--- Un boton que falla NUNCA se descarta para siempre: se reintenta mas tarde
--- (0.35s -> x2 -> tope 4s). Solo tras 6 fallos REALES se da por no-comprable.
--- Asi nada presente+comprable se "pierde" por un tick lento del server.
 local function buyReady(key, v)
     local a = buyAttempt[key]
     if not a then return true end
     if v and a.inst and a.inst ~= v then
-        buyAttempt[key] = nil   -- на этой позиции уже другая кнопка: запись протухла
+        buyAttempt[key] = nil
         return true
     end
     if a.n >= 6 then return false end
@@ -133,10 +116,7 @@ local function markBuyFail(key, v)
     if d > 4 then d = 4 end
     a.next = tick_() + d
 end
--- v7.6: блеклист привязан к ИНСТАНСУ кнопки, а не к позиции навсегда.
--- Тайкуны переиспользуют позиции: после покупки на том же месте спавнится
--- НОВАЯ кнопка — раньше она наследовала бан по ключу-позиции и пропускалась
--- (симптом: q 0 при живой цветной кнопке). Другой инстанс = запись чистится.
+
 local function isBlacklisted(key, v)
     local bl = buyBlacklist[key]
     if not bl then return false end
@@ -164,12 +144,8 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.23 ===")
+print("=== SELL LEMONS v18.24 ===")
 
--- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
--- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
--- кейбиндами, автосохранение конфига. Поверх игры остаётся только одна
--- жёлтая статус-строка лимонки (кулдаун/FARMING).
 local drawObjs = {}
 local function D(typ, props)
     local obj = Drawing.new(typ)
@@ -179,27 +155,25 @@ local function D(typ, props)
 end
 
 local CFG = {
-    buyWindow = 0.45,   -- окно подтверждения покупки (worker)
-    afkDelay  = 6,      -- сек без инпута до старта лимонки
-    zoomTicks = 22,     -- щелчков скролла в первое лицо (лишние на максимуме безвредны)
-    zoomStep  = 1,      -- если зум не в ту сторону - поставить -1
-    standRest = 60,     -- АвтоСтенд проходится раз в минуту, когда лимонка включена
-    vineCd    = 4 * 3600,   -- кулдаун Cash Vine (4 часа)
-    buyStuck  = 6,      -- сек без новых покупок -> автобай застрял, лимонка берёт ход
-    cheerY    = 0.85,   -- v18.12: высота клика CHEER (доля экрана; меньше = выше)
-    exitY     = 0.76,   -- высота клика EXIT на экране результата
+    buyWindow = 0.45,
+    afkDelay  = 6,
+    zoomTicks = 22,
+    zoomStep  = 1,
+    standRest = 60,
+    vineCd    = 4 * 3600,
+    buyStuck  = 6,
+    cheerY    = 0.85,
+    exitY     = 0.76,
 }
 
 local S = {
     lastUser = tick_(), pmx = 0, pmy = 0, keyDown = {}, lastFire = {},
 }
--- v12.5: таймер Cash Vine переживает перезапуски (tick() = unix-время)
+
 pcall_(function()
     if type(readfile) == "function" then
         local v = tonumber(readfile("selllemons_vine.txt"))
-        -- v18.17: мусор не грузим. Метка из БУДУЩЕГО (база tick() могла съехать
-        -- после обновления Матчи -> показывало "8 часов") или древняя -> с нуля;
-        -- у лозы пересинкается с живого лейбла.
+
         if v and v <= tick_() and (tick_() - v) < 7 * 24 * 3600 then CFG.vineT = v end
     end
 end)
@@ -211,13 +185,111 @@ function UX.fire(id)
     return true
 end
 
--- ---- Загрузка homesick ----
+local FX = { on = false, mods = {}, n = 0 }
+function FX.set(inst, prop, val)
+    pcall_(function()
+        local old = inst[prop]
+        if old == val then return end
+        inst[prop] = val
+        FX.n = FX.n + 1
+        FX.mods[FX.n] = { i = inst, p = prop, v = old }
+    end)
+end
+function FX.apply()
+    if FX.on then return end
+    FX.on = true
+    FX.gen = (FX.gen or 0) + 1
+    local gen = FX.gen
+    task_spawn(function()
+        pcall_(function()
+            local lt = game:GetService("Lighting")
+            FX.set(lt, "GlobalShadows", false)
+            FX.set(lt, "FogStart", 1e9)
+            FX.set(lt, "FogEnd", 1e9)
+            for _, e in ipairs_(lt:GetChildren()) do
+                local cn = tostring_(e.ClassName)
+                if cn == "BloomEffect" or cn == "BlurEffect" or cn == "SunRaysEffect"
+                   or cn == "ColorCorrectionEffect" or cn == "DepthOfFieldEffect" or cn == "Atmosphere" then
+                    if cn == "Atmosphere" then
+                        FX.set(e, "Density", 0)
+                    else
+                        FX.set(e, "Enabled", false)
+                    end
+                end
+            end
+        end)
+        pcall_(function()
+            local tr = Workspace:FindFirstChildOfClass("Terrain")
+            if tr then
+                FX.set(tr, "Decoration", false)
+                FX.set(tr, "WaterWaveSize", 0)
+                FX.set(tr, "WaterWaveSpeed", 0)
+                FX.set(tr, "WaterReflectance", 0)
+            end
+        end)
+
+        pcall_(function()
+            FX.set(settings().Rendering, "QualityLevel", Enum.QualityLevel.Level01)
+        end)
+        pcall_(function()
+            FX.set(UserSettings():GetService("UserGameSettings"), "SavedQualityLevel", Enum.SavedQualitySetting.QualityLevel1)
+        end)
+
+        local desc
+        pcall_(function() desc = Workspace:GetDescendants() end)
+        if desc then
+            local i = 1
+            while i <= #desc and FX.on and FX.gen == gen and ScriptActive do
+                local ok = pcall_(function()
+                    local stop = i + 400
+                    while i <= #desc and i < stop do
+                        local d = desc[i]
+                        local cn = tostring_(d.ClassName)
+                        if cn == "ParticleEmitter" or cn == "Trail" or cn == "Beam"
+                           or cn == "Smoke" or cn == "Fire" or cn == "Sparkles" then
+                            FX.set(d, "Enabled", false)
+                        elseif cn == "Decal" or cn == "Texture" then
+                            FX.set(d, "Transparency", 1)
+                        end
+                        i = i + 1
+                    end
+                end)
+                if not ok then i = i + 1 end
+                task_wait()
+            end
+        end
+        if FX.on and FX.gen == gen then rprint("[FPS] low graphics ON (" .. FX.n .. " changed)") end
+    end)
+end
+function FX.restore()
+    if not FX.on and FX.n == 0 then return end
+    FX.on = false
+    local mods, n = FX.mods, FX.n
+    FX.mods, FX.n = {}, 0
+
+    task_spawn(function()
+        local i = 1
+        while i <= n do
+            local ok = pcall_(function()
+                local stop = i + 400
+                while i <= n and i < stop do
+                    local m = mods[i]
+                    m.i[m.p] = m.v
+                    i = i + 1
+                end
+            end)
+            if not ok then i = i + 1 end
+            task_wait()
+        end
+        rprint("[FPS] graphics restored (" .. n .. ")")
+    end)
+end
+
 local homesick
 do
     local ok, err = pcall_(function()
         local src = game:HttpGet("https://raw.githubusercontent.com/sharedechoes/Matcha-Luas/refs/heads/main/homesick.lua")
-        -- v12.4: лимонная тема + без ''v1.4.0'' в футере. Патчим исходник до
-        -- запуска; если либу обновят и строки изменятся - gsub молча пропустит.
+
         src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(255, 214, 60),')
         src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(33, 29, 17),')
         src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(27, 24, 14),')
@@ -227,9 +299,7 @@ do
         src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(168, 154, 112),')
         src = src:gsub('%(ProjectState%.badgeText %.%. " | v1%.4%.0"%)', '(ProjectState.badgeText)')
         src = src:gsub('or "v1%.4%.0"', 'or ""')
-        -- v17.2: СТЕКЛЯННАЯ прозрачность. Drawing.Transparency = непрозрачность
-        -- (1=плотно). Понижаем альфу ТОЛЬКО фонов в ThemeAlpha - текст/акцент/
-        -- рамка остаются 1.0 (чёткие, читаемые). Получается стекло.
+
         src = src:gsub('bg = 1%.0,', 'bg = 0.68,')
         src = src:gsub('surface = 1%.0,', 'surface = 0.70,')
         src = src:gsub('surface2 = 1%.0,', 'surface2 = 0.78,')
@@ -246,8 +316,6 @@ end
 
 local UIRef = { win = nil, t = {} }
 
--- Состояние пишут коллбэки homesick напрямую; syncFromUI остался пустым,
--- потому что его зовут все воркеры (менять их не надо).
 local function syncFromUI() end
 local function syncToUI()
     pcall_(function() if UIRef.t.AutoBuy   then UIRef.t.AutoBuy:SetValue(autoBuyActive)     end end)
@@ -263,7 +331,6 @@ local function stopAll()
     print("[Hub] Everything stopped!")
 end
 
--- Фоллбэк-тогглер (клавиши 1-5, если homesick не загрузился)
 local function toggleFeature(slot)
     if not UX.fire("slot" .. slot) then return end
     if     slot == 1 then autoBuyActive   = not autoBuyActive
@@ -277,16 +344,12 @@ local function toggleFeature(slot)
     print("[Hub] toggle slot " .. slot)
 end
 
--- v15/v16: выбор стендов для авто-апгрейда. Позиции читаются из СВОЕГО тайкуна
--- В РАНТАЙМЕ (у каждого игрока свой тайкун, корды разные).
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
-local MG = { active = false, enabled = {} }   -- v17: Auto Minigame (всё в таблице = 1 регистр)
--- v18.16: сохранение состояния тогглов/позиции окна УДАЛЕНО (оператор: работало
--- криво - убрать). Все тогглы стартуют с дефолтов при каждой загрузке. No-op
--- оставлен, чтобы не трогать десяток вызовов в коллбэках.
+local MG = { active = false, enabled = {} }
+
 S.saveState = function() end
--- v18.2: список минигеймов = папки в Purchases.Minigames (для чекбоксов-селектора)
+
 MG.list = function()
     local out = {}
     if not myTycoon then return out end
@@ -296,8 +359,7 @@ MG.list = function()
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
             if c:IsA("Folder") or c:IsA("Model") then
-                -- только ИГРАБЕЛЬНЫЕ: внутри есть ProximityPrompt (скамейка с E).
-                -- Так отсекаем инфраструктуру вроде "Buttons".
+
                 local ok = false
                 pcall_(function()
                     for _, d in ipairs_(c:GetDescendants()) do
@@ -310,19 +372,9 @@ MG.list = function()
     end)
     return out
 end
--- v18.4: кулдаун включённого минигейма из живого мирового лейбла
--- (Purchases.Minigames.<name>...Gui.Label, формат Ч:ММ:СС). Возвращает секунды
--- или nil (готов / нет таймера). Читается ВСЕГДА, не только рядом (как лоза).
+
 MG.timerSec = function()
-    -- v18.15: кэш 1с. Эту функцию зовут статус-строка (была КАЖДЫЙ КАДР) и цикл
-    -- минигейма - а внутри полный GetDescendants по моделям минигеймов (тысячи
-    -- частей). Именно это клало FPS у людей при включённом Auto Minigame.
-    -- v18.18: игра при готовности ПРЯЧЕТ лейбл таймера и показывает "READY", а
-    -- скрытый лейбл ЗАМОРАЖИВАЕТСЯ с последним временем (скрин оператора: на
-    -- скамейке READY/PLAY, хаб ждёт "3:16" с мёртвого лейбла). Поэтому, как у
-    -- лозы: (1) таймер берём только с ВИДИМОГО лейбла, который РЕАЛЬНО ТИКАЕТ
-    -- (текст меняется; "доверяем после первого тика"); (2) видимый "READY" без
-    -- тикающего таймера = кулдауна нет, локальный отсчёт сбрасываем.
+
     local now = tick_()
     if MG.tsT and (now - MG.tsT) < 1.0 then return MG.tsVal end
     MG.tsT = now
@@ -341,35 +393,25 @@ MG.timerSec = function()
                     if tostring_(d.ClassName) == "TextLabel" then
                         local t; pcall_(function() t = d.Text end)
                         t = tostring_(t or "")
-                        -- v18.19: READY - только ТОЧНОЕ совпадение текста.
-                        -- find("READY") цеплял декорации трассы ("GET READY") ->
-                        -- вечный READY и бесконечные ТП к скамейке (скрин).
+
                         if (t:upper():gsub("[%s%p]", "")) == "READY" then
                             if MG.shown(d) then ready = true end
                         else
                             local hh, mm, ss = t:match("^%s*(%d+):(%d%d):(%d%d)%s*$")
                             if hh then
                                 local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
-                                -- v18.17: кулдаун минигейма - минуты; >2ч = чужой лейбл
+
                                 if r > 0 and r < 2 * 3600 then
-                                    -- v18.19: ключ свежести = GetFullName (строка).
-                                    -- Ключ-инстанс в Матче ненадёжен (обёртки могут
-                                    -- пересоздаваться на каждый GetDescendants) ->
-                                    -- запись "терялась" и живой тикающий таймер вечно
-                                    -- считался недоверенным -> rem не синкался ->
-                                    -- READY побеждал. Видимость (MG.shown) с таймера
-                                    -- тоже убрана: ложный Visible=false глушил живой
-                                    -- лейбл, а замороженные и так отсеит свежесть.
+
                                     local k; pcall_(function() k = d:GetFullName() end)
                                     k = k or nm
                                     local rec = MG.lblSeen[k]
                                     if not rec then
-                                        rec = { txt = t, t = 0, seen = now }   -- доверяем после первого тика
+                                        rec = { txt = t, t = 0, seen = now }
                                         MG.lblSeen[k] = rec
                                     elseif rec.txt ~= t then
                                         rec.txt = t
-                                        -- тик засчитываем только при НЕПРЕРЫВНОМ наблюдении
-                                        -- (после паузы тоггла первое "изменение" - не тик)
+
                                         rec.t = (now - rec.seen) <= 2.5 and now or 0
                                     end
                                     rec.seen = now
@@ -382,10 +424,7 @@ MG.timerSec = function()
             end
         end
     end)
-    -- тикающий таймер сильнее READY (скрытый READY-лейбл Матча может счесть
-    -- видимым - .Visible иногда читается как nil); READY без таймера = готов.
-    -- miniEnd = "уже истёк" (НЕ nil: статус покажет READY и придёт notify),
-    -- локальный отсчёт с мёртвого лейбла затирается.
+
     if not rem and ready then
         MG.miniEnd = now
     end
@@ -404,10 +443,7 @@ local function _standPartPos(c)
     if not pos then pcall_(function() if c.PrimaryPart then pos = c.PrimaryPart.Position end end) end
     return pos
 end
--- v16.1: ТП в точку, ГДЕ ЖМЁШЬ E (главный апгрейд-промпт), а не в центр площадки
--- из Locations (тот был в ~28 студах от стенда -> ''тепало далеко''). Промпт
--- лежит в Purchases.<name>.<name>.<name> (тройное имя) или в любом ProximityPrompt
--- ''Prompt'' внутри папки стенда.
+
 local function _standUpgradePos(folder, nm)
     local pos
     pcall_(function()
@@ -437,8 +473,7 @@ local function getStandLocations()
         local nm = tostring_(folder.Name)
         local low = nm:lower()
         if low:find("lemon") and not low:find("lemonx") then
-            -- v16.2: точка E (промпт) + сдвиг к центру площадки (Locations), чтобы
-            -- персонаж вставал ПЕРЕД стендом, а не внутрь конструкции ("криво").
+
             local pos = _standUpgradePos(folder, nm)
             local lpos = nil
             if loc then
@@ -449,7 +484,7 @@ local function getStandLocations()
                 local d = lpos - pos
                 local m = d.Magnitude
                 if m > 0.1 then
-                    local step = m < 6 and m or 6   -- сдвиг к центру, максимум 6 студов
+                    local step = m < 6 and m or 6
                     pos = pos + (d / m) * step
                 end
             elseif not pos then
@@ -461,12 +496,10 @@ local function getStandLocations()
     return out
 end
 
--- ---- Окно ----
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
     local window = homesick.createWindow("Sell Lemons", 480, 420)
-    -- v18.16: autoloadConfig/autoloadTheme убраны вместе со всем сохранением -
-    -- окно и тогглы каждый раз чистые, тема всегда наша жёлтая.
+
     UIRef.win = window
 
     local tab1 = window:addTab("Main")
@@ -512,16 +545,15 @@ if homesick then
 
     UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
         if val then
-            CFG.vineGo = true    -- ВКЛ: запомнить место и ТП к лозе
+            CFG.vineGo = true
         else
-            CFG.vineBack = true  -- ВЫКЛ: вернуться, где был
+            CFG.vineBack = true
         end
     end)
 
-    -- v18.16: режим для слабых ПК - все фоновые циклы реже (статус, сканы
-    -- телефона/минигейма, холостой автобай). Фарм-действия НЕ замедляет.
     UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
         CFG.slow = val and true or false
+        if val then FX.apply() else FX.restore() end
     end)
 
     pcall_(function() right:addSeparator() end)
@@ -540,8 +572,6 @@ if homesick then
         end)
     end)
 
-    -- v18.2: вкладка "Auto" - выбор стендов И минигеймов (чекбоксы). Хэндлы
-    -- храним в UIRef.standCb/miniCb, чтобы при загрузке отразить сохранённое.
     UIRef.standCb = {}
     UIRef.miniCb = {}
     pcall_(function()
@@ -557,12 +587,12 @@ if homesick then
                 S.saveState()
             end)
         end
-        -- минигеймы: чекбокс на каждый (Auto Minigame играет только включённые)
+
         local mgList = MG.list()
         if #mgList > 0 then
             local mgSec = autoTab:addSection("Minigames", "Right")
             for _, nm in ipairs_(mgList) do
-                local soon = nm:lower():find("trade") and true or false   -- Trade пока не готов
+                local soon = nm:lower():find("trade") and true or false
                 if soon then
                     MG.enabled[nm] = false
                     mgSec:addCheckbox("mini_" .. nm, nm .. " (soon)", false, function() end)
@@ -582,7 +612,6 @@ if homesick then
     print("[Hub] homesick UI loaded - keys 1-5 via keybinds")
 end
 
--- ==================== AUTOBUY ====================
 local function normalizeColor(c)
     local r, g, b = c.R, c.G, c.B
     if r <= 1 and g <= 1 and b <= 1 then
@@ -598,7 +627,6 @@ local function isGreyedOut(v)
     return mabs(r - g) < 30 and mabs(g - b) < 30 and mabs(r - b) < 30 and r < 200
 end
 
--- ==================== CACHE DE CARPETAS "Buttons" ====================
 local buttonsFolders   = {}
 local buttonsFolderSet = {}
 local buttonsCacheReady = false
@@ -662,19 +690,11 @@ local function getButtonsRealTime()
         if not buttonsCacheReady then return {} end
     end
 
-    -- v16: микро-кэш 0.12с. НЕ меняет ЧТО сканируем (scan-логика священна) -
-    -- только гасит лишние полные GetDescendants, когда worker + coordinator +
-    -- allButtonsDead + anyGivenUp + _anyLiveButtons зовут скан пачкой за тик.
-    -- Это главный источник лага при автобае. Вызыватели читают список только
-    -- на чтение и фильтруют по btn.Parent, так что 0.12с-давность безопасна.
     local now = tick_()
     if _bScan.list and (now - _bScan.t) < 0.12 then
         return _bScan.list
     end
 
-    -- ORIGINAL (v5.17): junta TODOS los "Button" BasePart bajo cada model,
-    -- incluyendo los anidados (model "Button" -> part "Button"). NO tocar:
-    -- la version "optimizada" rompia el scan en este tycoon (encontraba 0-1).
     local temp = {}
     local list = buttonsFolders
     for i = 1, #list do
@@ -699,7 +719,6 @@ local function getButtonsRealTime()
     return temp
 end
 
--- ==================== CACHE DE LEMON TREES ====================
 local lemonTrees       = {}
 local lemonTreeSet     = {}
 local lemonTreeCacheReady = false
@@ -832,10 +851,7 @@ local lastButtonCount = 0
 local lastLemonCount  = 0
 local lastCashCount   = 0
 
--- (v6.0) Хоткеи 1-5 и Insert теперь в INPUT-блоке внизу файла.
-
--- v7.4: режим сбора лимонов (автоопределяется на первых фруктах, см. ниже)
-local LSM = { mode = "classic", annAfk = false, annBuy = false }   -- v12.5: ТОЛЬКО классика (ТП+камера+клик). Автодетект тихих режимов лочился на нерабочем touch/sig -> лимонка переставала смотреть вверх и кликать
+local LSM = { mode = "classic", annAfk = false, annBuy = false }
 
 local ANTIGRAV_VEL = Vec3(0, 2, 0)
 RunService.RenderStepped:Connect(function()
@@ -849,7 +865,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ==================== SISTEMA v5.2 - 1 WORKER + COLA LOCAL PERSISTENTE ====================
 local localQueue   = {}
 local queueIndex   = 1
 local queueLock    = false
@@ -903,10 +918,6 @@ local function appendNewButtons()
     return added
 end
 
--- v18.15: результат живёт 0.15с (поля в _bScan). Эти проверки зовутся воркером,
--- координатором и автостендом по многу раз в сек, каждая - полный проход по
--- кнопкам с pcall-чтением цвета. Свежесть 0.15с лишь задерживает РЕШЕНИЕ
--- (резет/уступить ход) на доли секунды - сам процесс покупки не трогает.
 local function allButtonsDead()
     local now = tick_()
     if _bScan.deadT and (now - _bScan.deadT) < 0.15 then return _bScan.dead end
@@ -933,10 +944,6 @@ local function allButtonsDead()
     return dead
 end
 
--- v7.0: ''все мертвы'' бывает по двум причинам: (а) все кнопки СЕРЫЕ -> просто
--- не хватает денег; резет блеклиста тут НИЧЕГО не даёт, надо тихо ждать кэш;
--- (б) есть given-up кнопки (6 реальных провалов) -> вот им резет даёт второй
--- шанс. Резетим только в случае (б) — убирает спам ''ALL DEAD! Reset'' каждые 2с.
 local function anyGivenUpButtons()
     local now = tick_()
     if _bScan.giveT and (now - _bScan.giveT) < 0.15 then return _bScan.give end
@@ -978,16 +985,13 @@ local function cleanupQueue()
     queueLock = false
 end
 
-
--- ==================== AUTO STAND (TP a Purchases/* y spam E) ====================
-local STAND_KEY            = 0x45             -- Windows VK_E.
+local STAND_KEY            = 0x45
 local STAND_CYCLE_PAUSE    = 0.02
 local STAND_TP_Y_OFFSET    = 3
 local STAND_LOOP_DELAY     = 0.1
 
 local function _tpHrpTo(pos)
-    -- v10: метка ''стенд работает'' — лимонка не дёргает персонажа 4с после
-    -- каждого стендового ТП (защищено от зависания: метка протухает сама)
+
     if autoStandActive then LSM.standBusyT = tick_() end
     local character = player.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
@@ -1027,12 +1031,8 @@ local function _anyLiveButtons()
     return live
 end
 
-
 local STAND_E_SPAM_DURATION = 1.5
 
-
--- v15: апгрейд по Locations (реальные корды из СВОЕГО тайкуна) + селектор.
--- Заменяет старый поиск пустышек из Purchases, который не давал позиции для ТП.
 local function runLocationsPass(firstRun)
     local locs = getStandLocations()
     if #locs == 0 then
@@ -1044,31 +1044,30 @@ local function runLocationsPass(firstRun)
             print("[Stand] " .. s.name .. (standEnabled[s.name] == false and "  OFF" or "  ON"))
         end
     end
-    -- v18.14: стенд ОТДАЛЯЕТ камеру (третье лицо, как просил).
+
     LSM.zoom(-1)
-    -- v18.18: и наклоняет её СВЕРХУ ВНИЗ на пол ПКМ-орбитой - один раз на весь
-    -- проход (угол держится сам через все ТП между стендами).
+
     local tilted = LSM.tiltDown()
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
         if standEnabled[s.name] ~= false then
-            if autoBuyActive and _anyLiveButtons() then return "done" end   -- уступаем автобаю
-            if _tpHrpTo(s.pos) then   -- _tpHrpTo ставит LSM.standBusyT -> лимонка ждёт
+            if autoBuyActive and _anyLiveButtons() then return "done" end
+            if _tpHrpTo(s.pos) then
                 task_wait(0.05)
-                -- фоллбэк-ракурс (ПКМ недоступен/не в фокусе): lookAt по тикам
+
                 local eye, target
                 if not tilted then
                     pcall_(function()
                         local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                         if h then
                             local p = h.Position
-                            eye = p + Vec3(0, 10, 16)     -- выше и за спиной = отдалено
-                            target = p + Vec3(0, -1, 2)    -- смотрим вниз на стенд
+                            eye = p + Vec3(0, 10, 16)
+                            target = p + Vec3(0, -1, 2)
                         end
                     end)
                 end
-                _standIsTapping = true   -- автобай-воркер уступает на время спама
+                _standIsTapping = true
                 local t0 = tick_()
                 while autoStandActive and (tick_() - t0) < STAND_E_SPAM_DURATION do
                     LSM.lastBot = tick_()
@@ -1082,16 +1081,11 @@ local function runLocationsPass(firstRun)
             task_wait(STAND_CYCLE_PAUSE)
         end
     end
-    -- v18.15: НИЧЕГО не зумим обратно здесь. Лемон сам зайдёт в 1-е лицо, когда
-    -- получит ход (самовосстановление по LSM.zoomedIn в лемон-цикле) - это
-    -- происходит через ~2-4с после стенда (пока LSM.standBusyT свежий, лемон
-    -- ждёт), т.е. камера НЕ прыгает обратно мгновенно, как просил оператор.
+
     if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
     return "done"
 end
 
--- ==================== AUTO BUY (ORIGINAL v5.17 - worker + coordinator) ====================
--- Restaurado tal cual el codigo que SI funcionaba. TP a la posicion del boton.
 _wrap("autobuy-worker", function()
     local emptyStreak = 0
 
@@ -1152,7 +1146,7 @@ _wrap("autobuy-worker", function()
 
         if not item then
             if allButtonsDead() then
-                -- v7.0: резет только если есть given-up кнопки; все серые = ждём кэш
+
                 if anyGivenUpButtons() then
                     local now = tick_()
                     if now - lastResetTime > 2 then
@@ -1173,9 +1167,7 @@ _wrap("autobuy-worker", function()
                     appendNewButtons()
                 end
             end
-            -- v18.15: ХОЛОСТОЙ ход (покупать нечего) - 0.12с вместо 0.05с.
-            -- Покупки не замедляет (когда очередь не пуста, сюда не попадаем),
-            -- а холостые сканы режутся в ~2.5 раза. FPS Save -> ещё реже.
+
             task_wait(CFG.slow and 0.3 or 0.12)
             continue
         end
@@ -1187,9 +1179,6 @@ _wrap("autobuy-worker", function()
         local pos = btn.Position
         local px, py, pz = pos.X, pos.Y, pos.Z
 
-        -- v12.2: ТУРБО (firetouchinterest) ОТКАЧЕН ПОЛНОСТЬЮ - в этой игре он
-        -- ломал покупки (пропуск кнопок). Ниже классика v5.21 один-в-один,
-        -- та самая, что работала идеально. БОЛЬШЕ НЕ ТРОГАТЬ.
         pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
         task_wait(0.03)
 
@@ -1203,12 +1192,12 @@ _wrap("autobuy-worker", function()
                 gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
             end)
             if gone then bought = true; break end
-            -- кнопка посерела на середине (кончились деньги) - не упорствуем
+
             if isGreyedOut(btn) then break end
         end
 
         if bought then
-            buyBlacklist[key]  = btn   -- v7.6: храним инстанс — новая кнопка на этом месте не банится
+            buyBlacklist[key]  = btn
             failedButtons[key] = nil
             buyAttempt[key]    = nil
             totalBought = totalBought + 1
@@ -1225,7 +1214,6 @@ _wrap("autobuy-worker", function()
     end
 end)
 
--- Coordinador
 _wrap("autobuy-coord", function()
     while ScriptActive do
         syncFromUI()
@@ -1272,7 +1260,7 @@ _wrap("autobuy-coord", function()
                         task_wait(0.5)
                     end
                 else
-                    task_wait(0.5)   -- все серые: ждём деньги молча
+                    task_wait(0.5)
                 end
             else
                 task_wait(0.3)
@@ -1284,7 +1272,6 @@ _wrap("autobuy-coord", function()
     end
 end)
 
--- ==================== LEMON FARM ====================
 local lemonFailCount  = {}
 local LEMON_MAX_FAILS = 3
 local LEMON_MAX_PASSES = 6
@@ -1310,9 +1297,6 @@ local function findTreeOf(clickPart)
     return nil
 end
 
--- v13.7: ВОЗОБНОВЛЯЕМЫЙ цикл: семантика как у per-part pcall (ошибка на
--- одной части пропускает ТОЛЬКО её), но pcall один - без него подготовка
--- дерева занимала 10-15с, и камера всё это время не поднималась.
 local function disableTreeCanQuery(tree, excludeSet)
     local modified, n = {}, 0
     local parts
@@ -1331,7 +1315,7 @@ local function disableTreeCanQuery(tree, excludeSet)
                 i = i + 1
             end
         end)
-        if not ok then i = i + 1 end   -- пропустить проблемную часть, продолжить
+        if not ok then i = i + 1 end
     end
     return modified, n
 end
@@ -1349,12 +1333,6 @@ local function restoreTreeCanQuery(modified, n)
     end
 end
 
--- ==================== LEMON SILENT MODES (v7.4) ====================
--- Каскад от самого тихого к грубому, рабочий режим липнет на сессию:
---   cd      = fireclickdetector: не трогает НИЧЕГО (ни ТП, ни камеру, ни мышь)
---   sig     = firesignal(MouseClick): то же самое
---   touch   = ТП в фрукт; камера и мышь свободны
---   classic = старый способ: ТП + камера вверх + клик (последний резерв)
 function LSM.gone(v)
     return not (v and v.Parent and v:IsDescendantOf(Workspace))
 end
@@ -1418,8 +1396,6 @@ function LSM.touch(v, hrp)
     return false
 end
 
--- v7.5: клик по экранной позиции фрукта через WorldToScreen — камера НЕ
--- трогается; курсор возвращается на место после клика.
 function LSM.clickAt(v)
     local sp, on
     local okW = pcall_(function() sp, on = WorldToScreen(v.Position) end)
@@ -1437,27 +1413,17 @@ function LSM.clickAt(v)
     return true
 end
 
--- v10: вместо camera.lookAt из 3-го лица (клик не попадает) — скроллом
--- зумимся В первое лицо перед фармом и обратно после. Направление/глубина
--- настраиваются: CFG.zoomStep (если зум не в ту сторону - поставить -1) и
--- CFG.zoomTicks.
 function LSM.zoom(dir)
     if LSM.mode == "cd" or LSM.mode == "sig" then return end
     if type(mousescroll) ~= "function" then return end
-    LSM.zoomedIn = dir > 0   -- v18.15: трекаем зум - лемон сам перезумится, когда получит ход
+    LSM.zoomedIn = dir > 0
     for _ = 1, CFG.zoomTicks do
-        LSM.lastBot = tick_()   -- v18.18: штамп в цикле - зум 0.5с, окно бот-фазы 0.35с
+        LSM.lastBot = tick_()
         pcall_(mousescroll, CFG.zoomStep * dir)
         task_wait(0.02)
     end
 end
 
--- v18.18: камера СВЕРХУ ВНИЗ на пол (вид как на скрине оператора). v18.16
--- наводила стенд в центр экрана - но из-за спины он И ТАК в центре, наклона
--- не было ("только отдаляет, не двигает"). Правильно: зажать ПКМ (орбита, как
--- игрок) и увести мышь ВНИЗ С ЗАПАСОМ - Roblox сам клампит наклон (~80°),
--- перебор безвреден, выходит стабильный вид сверху. Угол ДЕРЖИТСЯ сам, без
--- мерцания. false = ПКМ нет/не в фокусе -> фоллбэк lookAt по тикам.
 function LSM.tiltDown()
     if not _windowFocused() then return false end
     if type(mouse2press) ~= "function" or type(mouse2release) ~= "function"
@@ -1467,22 +1433,17 @@ function LSM.tiltDown()
         LSM.lastBot = tick_()
         mouse2press()
         for _ = 1, 6 do
-            mousemoverel(0, 250)   -- 6x250px вниз = упор в кламп при любой чувствительности
+            mousemoverel(0, 250)
             LSM.lastBot = tick_()
             task_wait(0.02)
         end
         mouse2release()
         ok = true
     end)
-    pcall_(function() mouse2release() end)   -- страховка: ПКМ не должен залипнуть
+    pcall_(function() mouse2release() end)
     return ok
 end
 
--- v12: умный возврат после АФК-фарма. Порядок важен:
--- 1) ТП на место, где игрок стоял + погасить скорость (антиграв давал +Y);
--- 2) зум-аут из первого лица;
--- 3) вернуть ракурс: камера на тот же оффсет от персонажа, что и до фарма.
--- Якорь одноразовый (чистится), без якоря просто зум-аут.
 function LSM.returnHome()
     local a = LSM.anchor
     LSM.anchor = nil
@@ -1496,9 +1457,7 @@ function LSM.returnHome()
             end
         end)
     end
-    -- v18: НАМЕРЕННО отдаляем камеру обратно - зум-аут С ЗАПАСОМ (scroll всегда
-    -- работает, не как mousemoverel в 3-м лице), гарантированно выходим из 1-го
-    -- лица. Потом восстанавливаем точный ракурс.
+
     LSM.zoom(-1)
     LSM.lastBot = tick_()
     if type(mousescroll) == "function" then
@@ -1518,11 +1477,10 @@ end
 local function processLemon(v, hrp)
     if not v or not v:IsDescendantOf(Workspace) then return false end
 
-    -- играешь -> лимонка ПОЛНОСТЬЮ стоит: ни ТП, ни камеры, ни кликов.
     if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
-    -- v11.2: игра не в фокусе -> не кликаем (клик ушёл бы в другое окно)
+
     if not _windowFocused() then return false end
-    if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then return false end   -- стенд занят
+    if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then return false end
 
     local origSize, origTransp, origCanColl = nil, nil, nil
     local hitboxApplied = false
@@ -1538,13 +1496,9 @@ local function processLemon(v, hrp)
         end)
     end
 
-    -- v9: первый метод (как было изначально и работало надёжней всего):
-    -- ТП под фрукт, камера смотрит вверх на фрукт, быстрый клик в центр.
-    -- Запускается ТОЛЬКО когда ты AFK (см. гард выше), так что экран
-    -- дёргается только пока тебя нет.
     local vp = v.Position
     local tpX, tpY, tpZ = vp.X, vp.Y - 4, vp.Z
-    -- золотой блок: ТП + lookAt (быстрая попытка)
+
     pcall_(function()
         hrp.CFrame = CF(tpX, tpY, tpZ)
         task_wait(LEMON_TP_WAIT)
@@ -1554,29 +1508,24 @@ local function processLemon(v, hrp)
         task_wait(LEMON_CAM_WAIT)
     end)
 
-    -- v14: НАМЕРЕННАЯ ПРОВЕРКА прицела. Не верим lookAt на слово: через
-    -- WorldToScreen проверяем, что фрукт реально в кадре около центра.
-    -- Если нет - доворачиваем камеру РЕАЛЬНОЙ мышью (в 1-м лице mousemoverel
-    -- вращает взгляд, это не может не сработать) и перепроверяем. До 6 раз.
     pcall_(function()
         local vps = camera.ViewportSize
         local cx, cy = vps.X * 0.5, vps.Y * 0.5
         for _ = 1, 6 do
             local sp, on = WorldToScreen(vp)
             if on and sp and mabs(sp.X - cx) < vps.X * 0.18 and mabs(sp.Y - cy) < vps.Y * 0.18 then
-                break   -- прицел подтверждён: фрукт у центра кадра
+                break
             end
             LSM.lastBot = tick_()
             if on and sp then
                 mousemoverel(mfloor((sp.X - cx) * 0.5), mfloor((sp.Y - cy) * 0.5))
             else
-                mousemoverel(0, -260)   -- фрукт за кадром: задираем взгляд вверх
+                mousemoverel(0, -260)
             end
             task_wait(0.012)
         end
     end)
 
-    -- клик в центр (в 1-м лице курсор и есть прицел)
     pcall_(function()
         LSM.lastBot = tick_()
         local vps = camera.ViewportSize
@@ -1627,9 +1576,9 @@ local function processSnapshot(snapshot, hrp)
     local collectedCount = 0
     for _, tree in ipairs_(groupOrder) do
         if not lemonFarmActive then break end
-        if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end   -- игрок вернулся -> мгновенно отпускаем
-        if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end   -- уступаем автобаю
-        if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then break end   -- уступаем стенду
+        if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
+        if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
+        if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then break end
         local fruits = groups[tree]
         local excludeSet = {}
         for i = 1, #fruits do excludeSet[fruits[i]] = true end
@@ -1673,21 +1622,17 @@ _wrap("lemon-farm", function()
         local character = player.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
 
-        -- v8.0: автобай занят (очередь не пуста) -> лимонка ждёт, он покупает
         local buyBusy = lemonFarmActive and autoBuyActive and (#localQueue - queueIndex + 1) > 0
         if lemonFarmActive and LSM.annBuy ~= buyBusy then
             LSM.annBuy = buyBusy
             print(buyBusy and "[Lemon] pause: autobuy buying" or "[Lemon] autobuy done -> resume")
         end
         local afkNow = (tick_() - (S.lastUser or 0)) >= CFG.afkDelay
-        -- v16: лимонка забирает ход ТОЛЬКО когда автобай реально ЗАСТРЯЛ
-        -- (totalBought не растёт CFG.buyStuck сек = нет денег / всё серое), а
-        -- НЕ по таймеру. Пока автобай покупает (счётчик растёт) - лимонка ждёт,
-        -- чтобы он докупил всю пачку. Это убирает пинг-понг buy<->lemon.
+
         if buyBusy and afkNow then
             if totalBought ~= LSM.lastBoughtN then
                 LSM.lastBoughtN = totalBought
-                LSM.buyProgressT = tick_()   -- автобай купил -> прогресс есть
+                LSM.buyProgressT = tick_()
             end
             if not LSM.buyProgressT then LSM.buyProgressT = tick_() end
             if (tick_() - LSM.buyProgressT) > CFG.buyStuck then LSM.lemonSlot = true end
@@ -1699,9 +1644,7 @@ _wrap("lemon-farm", function()
         if lemonFarmActive and LSM.annAfk ~= afkNow then
             LSM.annAfk = afkNow
             if afkNow then
-                -- запомнить место/камеру для возврата. v18.12: ТОЛЬКО если якоря
-                -- ещё нет - иначе стенд-пасс (сброс annAfk) перезаписал бы якорь
-                -- позицией стенда, и returnHome увёл бы игрока не туда.
+
                 if not LSM.anchor then
                     pcall_(function()
                         local chr2 = player.Character
@@ -1712,10 +1655,7 @@ _wrap("lemon-farm", function()
                         end
                     end)
                 end
-                -- v18.15: сам зум переехал в начало фарма (блок LSM.zoomedIn ниже):
-                -- так он срабатывает и после стенд-пасса (тот отдаляет камеру и
-                -- может прерваться где угодно), и не дёргает камеру раньше, чем
-                -- лемон реально получит ход.
+
                 print("[Lemon] AFK -> zoom + farm")
             else
                 print("[Lemon] input detected -> back to your spot")
@@ -1724,17 +1664,13 @@ _wrap("lemon-farm", function()
         end
         if not lemonFarmActive and LSM.annAfk then
             LSM.annAfk = false
-            LSM.returnHome()   -- лимонку выключили посреди фарма: домой + зум
+            LSM.returnHome()
         end
         local standBusy = autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow then
-            -- v18.15: САМОВОССТАНОВЛЕНИЕ зума (золотой блок v13.5/13.7, перенесён
-            -- сюда). Камера не в 1-м лице (старт, возврат после input, стенд её
-            -- отдалял) -> зумимся и сразу смотрим вверх. Стенд держит standBusyT
-            -- свежим, так что после стендов сюда попадаем через ~2-4с - камера
-            -- НЕ прыгает обратно мгновенно.
+
             if not LSM.zoomedIn then
-                pcall_(function() camera = Workspace.CurrentCamera end)   -- v14: камера могла пересоздаться при респавне
+                pcall_(function() camera = Workspace.CurrentCamera end)
                 LSM.zoom(1)
                 pcall_(function()
                     local chrA = player.Character
@@ -1797,8 +1733,6 @@ _wrap("lemon-farm", function()
                 end
             end
 
-            -- v16: слот истрачен - отдаём персонажа автобаю и даём ему свежее
-            -- окно (сбрасываем таймер застревания), чтобы он снова докупал пачку
             if LSM.lemonSlot then
                 LSM.lemonSlot = false
                 LSM.buyProgressT = tick_()
@@ -1811,7 +1745,6 @@ _wrap("lemon-farm", function()
     end
 end)
 
--- ==================== CASH FARM ====================
 _wrap("cash-farm", function()
     while ScriptActive do
         syncFromUI()
@@ -1838,19 +1771,11 @@ _wrap("cash-farm", function()
     end
 end)
 
--- ==================== STATUS + INPUT v11 ====================
--- Статус-строка лимонки сверху по центру + трекинг активности + клавиша 6.
--- ВАЖНО: всё чтение клавиш/мыши только когда окно игры в фокусе (isrbxactive):
--- свернул игру и печатаешь в другом окне -> ничего не считывается, а лимонка
--- продолжает фармить в фоне.
 local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 214, 60)})
 local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 
--- v18.22: лоза переименовалась в "Cosmic Cash Vine" -> жёсткий путь Map.Sewer.
--- CashVine больше не находил её (пропали и READY, и таймер). Ищем контейнер по
--- "vine"/"cash" в имени и КЭШИРУЕМ. Поиск не чаще раза в 3с (полный обход дорог).
 function LSM.findVine()
     local c = LSM.vineRef
     if c and c.Parent then return c end
@@ -1860,7 +1785,7 @@ function LSM.findVine()
     pcall_(function()
         local map = Workspace:FindFirstChild("Map")
         local sewer = map and map:FindFirstChild("Sewer")
-        -- 1) старое место Map.Sewer: точное имя -> "cash"+"vine" -> просто "vine"
+
         if sewer then
             found = sewer:FindFirstChild("CashVine")
             if not found then
@@ -1875,7 +1800,7 @@ function LSM.findVine()
                 end
             end
         end
-        -- 2) шире - весь Map (вдруг перенесли из Sewer)
+
         if not found and map then
             for _, d in ipairs_(map:GetDescendants()) do
                 local ln = tostring_(d.Name):lower()
@@ -1887,9 +1812,6 @@ function LSM.findVine()
     return found
 end
 
--- v18.23: лоза теперь БЕЗ VineKey (зонд: его нет). Всё состояние в ОДНОМ лейбле
--- Map.Sewer.cashvine...attachment.gui.label ("HH:MM:SS" / "ready"). Находим и
--- кэшируем его по ClassName (НЕ IsA - IsA в Матче врёт), перепоиск не чаще 2с.
 function LSM.findVineLabel()
     local l = LSM.vineLblRef
     if l and l.Parent then return l end
@@ -1916,16 +1838,13 @@ end
 local function pollInput()
     if not ScriptActive then return end
     local nowA = tick_()
-    -- v18.16: опрос ввода ~30 раз/сек, не каждый кадр. Каждое чтение клавиши/
-    -- мыши - бридж-вызов эмулятора (их тут 8-9 за проход); на слабых ПК
-    -- по-кадровый опрос сам по себе ел кадры. 33мс задержка для АФК-детекта
-    -- и хоткеев неощутима.
+
     if (nowA - (S.pollT or 0)) < (CFG.slow and 0.06 or 0.03) then return end
     S.pollT = nowA
     local focused = _windowFocused()
 
     if focused then
-        -- фоллбэк-хоткеи 1-5 (только без homesick, иначе двойное срабатывание)
+
         if not UIRef.win then
             for i = 1, 5 do
                 local vk = 48 + i
@@ -1940,16 +1859,11 @@ local function pollInput()
             end
         end
 
-        -- активность игрока (пауза лимонки) — клики самой лимонки не считаются
         local mx, my = S.pmx, S.pmy
         if mouse then pcall_(function() mx = mouse.X; my = mouse.Y end) end
         local m1 = false
         pcall_(function() m1 = ismouse1pressed() end)
-        -- v12.5: КОРЕНЬ таймера по кругу: зум/ТП двигают камеру, а от этого
-        -- в Матче дрейфует mouse.X/Y -> скрипт принимал СВОИ действия за игрока
-        -- (фарм -> ''движение'' -> пауза -> зум-аут -> ''движение'' -> таймер...).
-        -- Решение: пока идёт ФАРМ или автобай покупает - мышь и клик вообще
-        -- не считаются активностью. Разбудить фарм: WASD/пробел.
+
         if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then
             S.busyT = nowA
         end
@@ -1966,9 +1880,6 @@ local function pollInput()
         end
     end
 
-    -- Cash Vine (v12.9): направление по ПОЗИЦИИ, а не по состоянию тоггла
-    -- (тоггл рассинхронивался: со второго раза ''только возвращал''). Рядом
-    -- с лозой = вернуться, далеко = запомнить место и ТП к лозе.
     if CFG.vineGo or CFG.vineBack then
         CFG.vineGo = false
         CFG.vineBack = false
@@ -1994,13 +1905,9 @@ local function pollInput()
         end)
     end
 
-    -- v18.15: всё ниже (статус-строки, чтение лейблов лозы, таймер минигейма)
-    -- обновляется ~7 раз/сек, а не каждый кадр - заметная часть лагов меню у
-    -- людей. Ввод/активность выше остались частыми.
     if (nowA - (S.statusT or 0)) < (CFG.slow and 0.4 or 0.15) then return end
     S.statusT = nowA
 
-    -- Статус-строки с делеями: лимонка + стенд + лоза
     local vx = 960
     pcall_(function() vx = camera.ViewportSize.X * 0.5 end)
     local sy = 8
@@ -2040,10 +1947,7 @@ local function pollInput()
     else
         statusTx2.Visible = false
     end
-    -- v18.23: состояние лозы из ОДНОГО лейбла (VineKey больше нет). "HH:MM:SS"
-    -- = кулдаун (vReady=false, vTimer=время), "ready"/"harvest" = готова. Переход
-    -- готова->кулдаун = момент сбора (старт 4ч). Таймер тикает только рядом ->
-    -- замороженный (ушёл далеко) для синка НЕ берём (vineLblChangeT < 3с).
+
     local vReady, vTimer
     pcall_(function()
         local lbl = LSM.findVineLabel()
@@ -2076,14 +1980,13 @@ local function pollInput()
         end
         LSM.vineWasReady = vReady
     end
-    -- (vTimer уже вычислен выше из того же лейбла - отдельный блок не нужен)
+
     if vTimer then
-        -- синхронизируем локальную оценку с настоящим временем (для оффлайна)
+
         pcall_(function()
             local hh, mm, ss = vTimer:match("^(%d+):(%d%d):(%d%d)$")
             local remS = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
-            -- v18.17: "осталось" больше кулдауна = это НЕ таймер лозы (чужой
-            -- лейбл/мусор; один раз так вписало 8ч) - такое не синкаем
+
             if remS > CFG.vineCd + 60 then return end
             local newT = tick_() - (CFG.vineCd - remS)
             if not CFG.vineT or mabs(newT - CFG.vineT) > 60 then
@@ -2094,17 +1997,14 @@ local function pollInput()
             end
         end)
     end
-    -- v18.17: последний рубеж - метка старта кулдауна из будущего физически
-    -- невозможна (это и давало "осталось 8 часов"). Сбрасываем; рядом с лозой
-    -- таймер пересинкается сам с лейбла.
+
     if CFG.vineT and CFG.vineT > tick_() + 60 then
         CFG.vineT = nil
         pcall_(function()
             if type(writefile) == "function" then writefile("selllemons_vine.txt", "") end
         end)
     end
-    -- v13.1: показываем СВОЙ тикающий отсчёт всегда (замок обновляется
-    -- игрой только рядом с лозой). Лейбл - только для синхронизации.
+
     if vReady == true then
         statusTx3.Text = "cash vine  |  READY"
         statusTx3.Color = C3rgb(255, 214, 60)
@@ -2135,8 +2035,7 @@ local function pollInput()
     else
         statusTx3.Visible = false
     end
-    -- v18.13: таймер минигейма. Лейбл стримится (виден только вблизи), поэтому
-    -- ведём ЛОКАЛЬНЫЙ отсчёт MG.miniEnd и синкаем когда лейбл доступен (как лоза).
+
     if MG.active then
         local cd = MG.timerSec()
         if cd and cd > 0 then MG.miniEnd = tick_() + cd end
@@ -2146,7 +2045,7 @@ local function pollInput()
             statusTx4.Color = C3rgb(222, 210, 170)
             MG.miniNotif = false
         elseif not MG.miniEnd then
-            statusTx4.Text = "minigame  |  --"   -- таймер ещё не синкнут (далеко от скамейки)
+            statusTx4.Text = "minigame  |  --"
             statusTx4.Color = C3rgb(222, 210, 170)
         else
             statusTx4.Text = "minigame  |  READY"
@@ -2169,11 +2068,6 @@ RunService.RenderStepped:Connect(function()
     if not ok then reportErr("ui-input", err) end
 end)
 
--- ==================== AUTO DEAL v3 (точный путь: PlayerGui.Phone) ====================
--- Зонд показал: телефон = ScreenGui "Phone" в PlayerGui. Тексты верхних кнопок
--- каждый раз разные, нижняя всегда отказ (No./Nvm.) - жмём ВЕРХНЮЮ по позиции.
--- ВАЖНО (уроки зондов): IsA и чтение .Visible в Матче ненадёжны - классы
--- сравниваем по ClassName, видимость читаем через pcall (nil = не блокирует).
 _wrap("auto-deal", function()
     local function btnText(b)
         local t
@@ -2218,12 +2112,10 @@ _wrap("auto-deal", function()
                 if not pg then return end
                 local phone = pg:FindFirstChild("Phone")
                 if not phone then return end
-                -- v18.15: телефон выключен (Enabled=false) -> не обходим его дерево
-                -- зря каждые полсекунды. Семантика та же: shownB всё равно отбросил
-                -- бы все кнопки выключенного ScreenGui.
+
                 local phEn; pcall_(function() phEn = phone.Enabled end)
                 if phEn == false then return end
-                -- кандидаты: все кнопки телефона с текстом
+
                 local btns, bn = {}, 0
                 for _, d in ipairs_(phone:GetDescendants()) do
                     local cn = tostring_(d.ClassName)
@@ -2235,8 +2127,8 @@ _wrap("auto-deal", function()
                         end
                     end
                 end
-                if bn < 2 then return end   -- телефон закрыт/пустой
-                -- верхняя по экрану
+                if bn < 2 then return end
+
                 local best, bestY
                 for i = 1, bn do
                     local y
@@ -2247,11 +2139,7 @@ _wrap("auto-deal", function()
                     end
                 end
                 if not best or isReject(btnText(best)) then return end
-                -- v14.2: firesignal/хуки/getgc в Matcha недоступны -> принять
-                -- сделку можно ТОЛЬКО реальным кликом. Делаем его НЕВИДИМЫМ:
-                -- запоминаем курсор, прыгаем на кнопку, нажал-отпустил, сразу
-                -- возвращаем курсор - одним проходом без пауз, кадр не успевает
-                -- отрисовать промежуточное положение.
+
                 local apos, asz
                 pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
                 if apos and asz then
@@ -2268,7 +2156,7 @@ _wrap("auto-deal", function()
                         mouse1release()
                         if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
                     end)
-                    -- не зарегалось с первого раза -> вторая попытка с микропаузой
+
                     task_wait(0.12)
                     if best.Parent and shownB(best) then
                         LSM.lastBot = tick_()
@@ -2287,11 +2175,6 @@ _wrap("auto-deal", function()
     end
 end)
 
--- ==================== AUTO MINIGAME (v18.1) ====================
--- Зонд раскрыл структуру: PLAY = PromptGui (или E у скамейки); PICK = 4 кнопки
--- в PlayerGui.PickGui; CHEER = PlayerGui.MinigameRace.Button (текст exit<->cheer).
--- Ищем кнопки по тексту по ВСЕМУ PlayerGui (v17 искал только в MinigameRace ->
--- не находил PICK). Спамим CHEER, жмём любой PICK, на скамейке - E/PLAY.
 function MG.text(d)
     local t; pcall_(function() t = d.Text end)
     if not t or t == "" then
@@ -2316,11 +2199,7 @@ function MG.shown(o)
     end
     return true
 end
--- найти кнопку по тексту; needPos=true -> только с реальной экранной позицией.
--- v18.15: сперва ищем в ИЗВЕСТНЫХ контейнерах минигейма (зонды: CHEER/EXIT в
--- MinigameRace, PICK в PickGui, PLAY в PromptGui) - они маленькие. Полный обход
--- PlayerGui (тысячи элементов, лагал меню по 3-4 раза за тик) остался лишь
--- страховкой не чаще раза в 1.5с.
+
 function MG.scanBtns(root, want, needPos)
     local hit
     pcall_(function()
@@ -2349,8 +2228,7 @@ function MG.findBtn(want, needPos)
             if hit then return hit end
         end
     end
-    -- страховка ПО-КНОПОЧНО (аудит: общий таймер отдавал весь бюджет CHEER'у,
-    -- и EXIT/PICK/PLAY никогда не добирались до полного скана)
+
     local now = tick_()
     if type(MG.fsT) ~= "table" then MG.fsT = {} end
     if (now - (MG.fsT[want] or 0)) < 1.5 then return nil end
@@ -2361,9 +2239,8 @@ function MG.click(btn)
     local ap, az
     pcall_(function() ap = btn.AbsolutePosition; az = btn.AbsoluteSize end)
     if not ap or not az then return end
-    if ap.X <= 1 and ap.Y <= 1 then return end   -- ещё не отрисована -> не кликаем в угол
-    -- v18.11: БЕЗ GuiInset. AbsolutePosition уже в экранных координатах; +inset
-    -- уводил клик на ~36px НИЖЕ кнопки (CHEER/EXIT мимо, "криво").
+    if ap.X <= 1 and ap.Y <= 1 then return end
+
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     LSM.lastBot = tick_()
@@ -2373,8 +2250,7 @@ function MG.click(btn)
         if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
     end)
 end
--- v18.2: позиция входа = промпт ТОЛЬКО включённого минигейма (селектор), чтобы
--- не лезть во "вторую игру", которую отключили.
+
 function MG.entryPos()
     if not myTycoon then return nil end
     local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
@@ -2384,7 +2260,7 @@ function MG.entryPos()
     pcall_(function()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
-            -- v18.9: Trade пока НЕ играем (coming soon) - жёстко пропускаем
+
             if MG.enabled[nm] ~= false and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
@@ -2396,11 +2272,7 @@ function MG.entryPos()
     end)
     return pos
 end
--- v18.2: PICK-кнопки = BillboardGui под мячами, у них AbsolutePosition 0,0 ->
--- кликаем по 4 экранным позициям внизу (где они отрисованы). Любой PICK годится.
--- v18.6: PICK-кнопки = билборды под 4 мячами (поз 0,0). Кликаем по экранным
--- позициям. Раньше один ряд на 0.84 высоты - оказался НИЖЕ кнопок. Теперь
--- НЕСКОЛЬКО рядов (0.74/0.78/0.82), один точно попадёт. Любой PICK годится.
+
 function MG.clickSlots()
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
@@ -2419,7 +2291,7 @@ function MG.clickSlots()
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
--- v18.12: клик по доле экрана (для CHEER/EXIT - AbsolutePosition давал не ту точку)
+
 function MG.clickRatio(fx, fy)
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
@@ -2431,40 +2303,33 @@ function MG.clickRatio(fx, fy)
     end)
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
--- v18.5: НЕПРЕРЫВНЫЙ супербыстрый спам CHEER. Встаём на кнопку ОДИН раз, дальше
--- жмём мышь каждый кадр без движений курсора и без пауз - максимально часто.
--- Каждые 16 кликов проверяем, что кнопка ещё CHEER (не "exit"/исчезла = гонка всё).
+
 function MG.spamCheer(btn)
-    -- v18.12: AbsolutePosition CHEER-кнопки давал клик СЛИШКОМ НИЗКО (система
-    -- координат не та; для PICK тоже пришлось перейти на доли экрана). Кликаем
-    -- по доле экрана: центр по X, CFG.cheerY по высоте. btn нужен только чтобы
-    -- понять, что гонка ещё идёт.
+
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
     local cx, cy = mfloor(vw * 0.5), mfloor(vh * CFG.cheerY)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
-    pcall_(function() mousemoveabs(cx, cy) end)   -- встаём на CHEER один раз
+    pcall_(function() mousemoveabs(cx, cy) end)
     local n = 0
-    local tCap = tick_()   -- v18.15: страховка - гонка длится <1мин, дольше 75с не спамим
+    local tCap = tick_()
     while MG.active and ScriptActive and (tick_() - tCap) < 75 do
         LSM.lastBot = tick_()
         pcall_(function() mouse1press(); mouse1release() end)
         n = n + 1
         if n % 8 == 0 then
             local ok, still = pcall_(function() return btn.Parent and MG.text(btn):find("CHEER") end)
-            if not (ok and still) then break end   -- гонка кончилась / кнопка пропала
-            pcall_(function() mousemoveabs(cx, cy) end)   -- держим курсор на кнопке
+            if not (ok and still) then break end
+            pcall_(function() mousemoveabs(cx, cy) end)
             LSM.standBusyT = tick_()
         end
-        task_wait(0.05)   -- v18.8: ≈20 кликов/сек - быстро, но БЕЗ фриза (раньше
-        -- было каждый кадр + 2 клика -> FPS падал в пол)
+        task_wait(0.05)
+
     end
     pcall_(function() if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end end)
 end
--- v18.9: после гонки -> экран "YOU GOT ...! EXIT" (resultUp) -> жмём EXIT ->
--- вылазит ЧЕК (Popup.Check) -> клик по центру, забираем деньги. Потом кулдаун
--- 5 мин, и если включено - стартуем заново (ветка входа при cd<=0).
+
 function MG.resultUp()
     local pg = player:FindFirstChildOfClass("PlayerGui")
     local mr = pg and pg:FindFirstChild("MinigameRace")
@@ -2487,15 +2352,13 @@ function MG.checkUp()
     local chk = popup and popup:FindFirstChild("Check")
     return (chk and MG.shown(chk)) or false
 end
--- v18.11: клик по чеку. Сначала реальная позиция самого большого видимого
--- элемента Popup.Check (на нём ловится клик), потом центр экрана - страховка.
--- По 2 клика каждый, чтобы точно зарегалось.
+
 function MG.clickCheck()
     local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
-    -- 1) точка на самом чеке
+
     pcall_(function()
         local pg = player:FindFirstChildOfClass("PlayerGui")
         local popup = pg and pg:FindFirstChild("Popup")
@@ -2519,7 +2382,7 @@ function MG.clickCheck()
             mousemoveabs(mfloor(bx), mfloor(by)); mouse1press(); mouse1release()
         end
     end)
-    -- 2) центр экрана - страховка
+
     pcall_(function()
         LSM.lastBot = tick_()
         mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); mouse1press(); mouse1release()
@@ -2532,76 +2395,56 @@ _wrap("auto-minigame", function()
     while ScriptActive do
         if MG.active then
             pcall_(function()
-                -- 1) ГОНКА: CHEER -> непрерывный спам.
-                -- v18.15: БЕЗ needPos! У кнопки гонки AbsolutePosition бывает 0,0
-                -- (как у PICK-билбордов; зависит от разрешения/клиента) -> CHEER
-                -- не находился, raceEndT не ставился, и EXIT после гонки тоже не
-                -- жался. Позиция кнопки и не нужна: спамим по доле экрана.
+
                 local cheer = MG.findBtn("CHEER")
                 if cheer then
                     LSM.standBusyT = tick_()
-                    MG.exitTries = 0   -- новая гонка -> сбрасываем счётчики попыток
+                    MG.exitTries = 0
                     MG.checkTries = 0
                     MG.checkDone = false
                     MG.spamCheer(cheer)
-                    MG.raceEndT = tick_()   -- гонка только что закончилась
+                    MG.raceEndT = tick_()
                     return
                 end
-                -- v18.12: EXIT и чек жмём ПО НЕСКОЛЬКУ ПОПЫТОК ЗА ГОНКУ, а не
-                -- бесконечно. Раньше checkUp/resultUp ложно срабатывали на скрытых
-                -- лейблах -> скрипт 40с долбил курсор, нельзя было двигать камеру.
+
                 local justRaced = (tick_() - (MG.raceEndT or 0)) < 40
-                -- 2) КОНЕЦ ГОНКИ: видна кнопка EXIT (та же MinigameRace.Button, что
-                -- была CHEER) -> кликаем ПО САМОЙ КНОПКЕ (если у неё есть позиция)
-                -- плюс по нескольким высотам. Макс 6 попыток за гонку.
-                -- v18.15: ВИДИМАЯ кнопка EXIT срабатывает и без justRaced (если
-                -- CHEER-фаза была пропущена, гонку всё равно надо закрыть);
-                -- ненадёжный resultUp остаётся под защитой justRaced.
-                -- v18.21: как только появился ЧЕК - EXIT больше НЕ жмём (и не
-                -- двигаем курсор по высотам), сразу к ветке чека. И чек уже
-                -- забран (checkDone) - тоже стоп.
+
                 local exitBtn = (not MG.checkDone) and (MG.exitTries or 0) < 6 and MG.findBtn("EXIT") or nil
                 if not MG.checkDone and not MG.checkUp() and (MG.exitTries or 0) < 6 and (exitBtn or (justRaced and MG.resultUp())) then
                     LSM.standBusyT = tick_()
                     MG.exitTries = (MG.exitTries or 0) + 1
-                    if not justRaced then MG.raceEndT = tick_() - 30 end   -- короткое окно (10с) для чека
+                    if not justRaced then MG.raceEndT = tick_() - 30 end
                     if exitBtn then MG.click(exitBtn) end
                     MG.clickRatio(0.5, 0.80); MG.clickRatio(0.5, 0.86); MG.clickRatio(0.5, 0.91)
                     task_wait(0.6)
                     return
                 end
-                -- 3) ЧЕК на экране -> ОДИН проход кликов и СТОП. clickCheck бьёт
-                -- 4 раза (2 по чеку + 2 в центр) - этого хватает забрать. На
-                -- checkUp, чтобы понять "забрал", полагаться НЕЛЬЗЯ: .Visible в
-                -- Матче врёт и держит "виден" -> курсор ещё дёргался (жалоба).
-                -- Поэтому кликнули раз -> checkDone, и БОЛЬШЕ ни курсора, ни
-                -- кликов до новой гонки (checkDone снимается на новом PICK/CHEER).
+
                 if justRaced and not MG.checkDone and MG.checkUp() then
                     LSM.standBusyT = tick_()
                     MG.clickCheck()
                     MG.checkDone = true
-                    MG.raceEndT = 0       -- justRaced=false -> хвост обрывается, идём на кулдаун
+                    MG.raceEndT = 0
                     return
                 end
-                -- 4) ВЫБОР: PICK (билборды) -> клик по экранным долям
+
                 if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_()
-                    MG.checkDone = false   -- новая гонка началась -> снова можно забрать чек
+                    MG.checkDone = false
                     MG.exitTries = 0
                     MG.clickSlots()
                     task_wait(0.4)
                     return
                 end
-                -- 5) КУЛДАУН? ждём. Таймер-лейбл стримится (виден только вблизи),
-                -- поэтому ведём ЛОКАЛЬНЫЙ отсчёт и синкаем когда лейбл доступен.
+
                 local cd = MG.timerSec()
-                if cd and cd > 0 then MG.miniEnd = tick_() + cd end   -- синк у скамейки
+                if cd and cd > 0 then MG.miniEnd = tick_() + cd end
                 local localCd = MG.miniEnd and (MG.miniEnd - tick_()) or nil
                 if (cd and cd > 0) or (localCd and localCd > 0) then
                     task_wait(0.5)
                     return
                 end
-                -- 6) ВХОД: PLAY/E у скамейки включённого минигейма
+
                 LSM.standBusyT = tick_()
                 local play = MG.findBtn("PLAY", true)
                 if play then MG.click(play) end
@@ -2610,11 +2453,10 @@ _wrap("auto-minigame", function()
                 local started = false
                 for _ = 1, 12 do
                     if not MG.active then break end
-                    if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end   -- минигейм пошёл
+                    if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end
                     keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
-                -- v18.19: вход не удался -> пауза подольше, чтобы не ТПшить
-                -- персонажа очередями, если READY оказался ложным/E не сработал
+
                 task_wait(started and 0.3 or 2)
             end)
         end
@@ -2622,7 +2464,6 @@ _wrap("auto-minigame", function()
     end
 end)
 
--- ==================== AUTO STAND standalone loop ====================
 _wrap("auto-stand", function()
     local lastDiag = 0
     local firstRun = true
@@ -2651,17 +2492,13 @@ _wrap("auto-stand", function()
             continue
         end
 
-        -- v15: только Locations-пасс (реальные корды из своего тайкуна + селектор).
-        -- Старые manage/stand пассы искали пустышки без позиций -> не тепало.
         local res = runLocationsPass(firstRun)
         firstRun = false
         if res == "off" then
             task_wait(0.05)
             continue
         end
-        -- v18: ПРЕРЫВАЕМОЕ ожидание. Раньше task_wait(60) блокировал на всю
-        -- минуту - выключил лемон, а стенд всё равно ждёт минуту. Теперь длину
-        -- паузы пересчитываем вживую: лемон выключили -> ждём только STAND_LOOP_DELAY.
+
         local t0 = tick_()
         while ScriptActive and autoStandActive do
             local rest = lemonFarmActive and CFG.standRest or STAND_LOOP_DELAY
@@ -2673,7 +2510,8 @@ _wrap("auto-stand", function()
 end)
 
 _G.MatchaCleanup = function()
-    pcall_(LSM.returnHome)   -- выгрузили посреди АФК-фарма: вернуть игрока на место
+    pcall_(LSM.returnHome)
+    pcall_(FX.restore)
     ScriptActive = false
     pcall_(function() if UIRef.win then UIRef.win.visible = false end end)
     for _, obj in ipairs_(drawObjs) do
@@ -2682,6 +2520,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
--- v18.19: версия в видимом логе - чтобы было видно, что raw-кэш GitHub (~5 мин)
--- отдал СВЕЖИЙ скрипт, а не старый
-rprint("sell lemons v18.23 loaded")
+rprint("sell lemons v18.24 loaded")
