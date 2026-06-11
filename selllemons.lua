@@ -144,7 +144,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.27 ===")
+print("=== SELL LEMONS v18.28 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -436,6 +436,36 @@ MG.timerSec = function()
     end
     MG.tsVal = rem
     return rem
+end
+
+MG.name = function()
+    if MG.nameVal and (tick_() - (MG.nameT or 0)) < 5 then return MG.nameVal end
+    MG.nameT = tick_()
+    local out
+    if myTycoon then
+        local pur; pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
+        local mg = pur and pur:FindFirstChild("Minigames")
+        if mg then
+            pcall_(function()
+                for _, c in ipairs_(mg:GetChildren()) do
+                    local cn = tostring_(c.Name)
+                    if MG.enabled[cn] ~= false and not cn:lower():find("trade") then
+                        for _, d in ipairs_(c:GetDescendants()) do
+                            if tostring_(d.ClassName) == "ProximityPrompt" then
+                                local ot; pcall_(function() ot = d.ObjectText end)
+                                ot = tostring_(ot or "")
+                                if ot ~= "" and ot ~= "nil" then out = ot; return end
+                            end
+                        end
+                        out = (cn:gsub("^[Mm]inigame%s+", ""))
+                        return
+                    end
+                end
+            end)
+        end
+    end
+    MG.nameVal = out
+    return out
 end
 local function _standPartPos(c)
     local pos
@@ -2047,23 +2077,24 @@ local function pollInput()
         statusTx3.Visible = false
     end
 
-    if MG.active then
+    local mgName = MG.name()
+    if mgName then
         local cd = MG.timerSec()
         if cd and cd > 0 then MG.miniEnd = tick_() + cd end
         local rem = MG.miniEnd and (MG.miniEnd - tick_()) or nil
         if rem and rem > 0 then
-            statusTx4.Text = sformat("minigame  |  %d:%02d", mfloor(rem / 60), mfloor(rem % 60))
+            statusTx4.Text = sformat("%s  |  %d:%02d", mgName, mfloor(rem / 60), mfloor(rem % 60))
             statusTx4.Color = C3rgb(222, 210, 170)
             MG.miniNotif = false
         elseif not MG.miniEnd then
-            statusTx4.Text = "minigame  |  --"
+            statusTx4.Text = mgName .. "  |  --"
             statusTx4.Color = C3rgb(222, 210, 170)
         else
-            statusTx4.Text = "minigame  |  READY"
+            statusTx4.Text = mgName .. "  |  READY"
             statusTx4.Color = C3rgb(255, 214, 60)
-            if not MG.miniNotif then
+            if MG.active and not MG.miniNotif then
                 MG.miniNotif = true
-                pcall_(function() notify("Minigame is READY", "Sell Lemons", 4) end)
+                pcall_(function() notify(mgName .. " is READY", "Sell Lemons", 4) end)
             end
         end
         statusTx4.Position = Vec2(vx, sy)
@@ -2559,4 +2590,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.27 loaded")
+rprint("sell lemons v18.28 loaded")
