@@ -146,7 +146,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.31 ===")
+print("=== SELL LEMONS v18.32 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -361,7 +361,7 @@ local function toggleFeature(slot)
     print("[Hub] toggle slot " .. slot)
 end
 
-local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Labs", "Lemon Trading", "Lemon Robotics", "Lemon Republic"}
+local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Trading", "Lemon Labs", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }
 
@@ -511,6 +511,14 @@ local function _standUpgradePos(folder, nm)
     end
     return pos
 end
+
+local STAND_ORDER = {"stand", "dash", "depot", "trading", "labs", "robotics", "republic"}
+local function standRank(low)
+    for i = 1, #STAND_ORDER do
+        if low:find(STAND_ORDER[i], 1, true) then return i end
+    end
+    return 99
+end
 local function getStandLocations()
     local out = {}
     if not myTycoon then return out end
@@ -521,7 +529,8 @@ local function getStandLocations()
     for _, folder in ipairs_(pur:GetChildren()) do
         local nm = tostring_(folder.Name)
         local low = nm:lower()
-        if low:find("lemon") and not low:find("lemonx") then
+        local rank = standRank(low)
+        if rank < 99 and not low:find("lemonx") then
 
             local pos = _standUpgradePos(folder, nm)
             local lpos = nil
@@ -539,9 +548,10 @@ local function getStandLocations()
             elseif not pos then
                 pos = lpos
             end
-            if pos then tinsert(out, {name = nm, pos = pos}) end
+            if pos then tinsert(out, {name = nm, pos = pos, rank = rank}) end
         end
     end
+    table.sort(out, function(a, b) return a.rank < b.rank end)
     return out
 end
 
@@ -580,7 +590,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v18.31  |  by neaxus") end)
+    pcall_(function() window:setBadge("Sell Lemons v18.32  |  by neaxus") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -632,9 +642,10 @@ if homesick then
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
         if #listed == 0 then listed = STAND_NAMES end
-        for _, nm in ipairs_(listed) do
+        for idx, nm in ipairs_(listed) do
             if standEnabled[nm] == nil then standEnabled[nm] = true end
-            UIRef.standCb[nm] = sec:addCheckbox("stand_" .. nm, nm, true, function(val)
+
+            UIRef.standCb[nm] = sec:addCheckbox("stand_" .. nm, idx .. ". " .. nm, true, function(val)
                 standEnabled[nm] = val
                 S.saveState()
             end)
@@ -2493,47 +2504,42 @@ _wrap("auto-minigame", function()
                     LSM.standBusyT = tick_()
                     MG.sessExit = 0; MG.sessCheck = 0
                     MG.spamCheer(cheer)
+                    MG.raceEndT = tick_()
                     return
                 end
 
-                local exitBtn = MG.findBtn("EXIT")
+                local justRaced = (tick_() - (MG.raceEndT or 0)) < 30
+
+                local exitBtn = justRaced and MG.findBtn("EXIT") or nil
                 if exitBtn then
                     MG.sessExit = (MG.sessExit or 0) + 1
-                    MG.exitSeen = true
                     if MG.sessExit <= 6 then
                         LSM.standBusyT = tick_()
                         MG.click(exitBtn)
                         task_wait(0.35)
-                    else
-                        task_wait(0.5)
-                    end
+                    else task_wait(0.5) end
                     return
-                elseif MG.exitSeen then
-                    MG.sessExit = 0; MG.exitSeen = false
                 end
 
                 local popUp = false
-                pcall_(function()
-                    local pg = getPlayerGui()
-                    local popup = pg and pg:FindFirstChild("Popup")
-                    if popup then
-                        local en; pcall_(function() en = popup.Enabled end)
-                        if en ~= false and popup:FindFirstChild("Check") then popUp = true end
-                    end
-                end)
+                if justRaced then
+                    pcall_(function()
+                        local pg = getPlayerGui()
+                        local popup = pg and pg:FindFirstChild("Popup")
+                        if popup then
+                            local en; pcall_(function() en = popup.Enabled end)
+                            if en ~= false and popup:FindFirstChild("Check") then popUp = true end
+                        end
+                    end)
+                end
                 if popUp then
                     MG.sessCheck = (MG.sessCheck or 0) + 1
-                    MG.popupSeen = true
                     if MG.sessCheck <= 6 then
                         LSM.standBusyT = tick_()
                         MG.clickCheck()
                         task_wait(0.35)
-                    else
-                        task_wait(0.5)
-                    end
+                    else task_wait(0.5) end
                     return
-                elseif MG.popupSeen then
-                    MG.sessCheck = 0; MG.popupSeen = false
                 end
 
                 if MG.findBtn("PICK") then
@@ -2564,15 +2570,10 @@ _wrap("auto-minigame", function()
                     if synced then task_wait(0.5); return end
                 end
 
-                local pos = MG.entryPos()
-                local near = false
-                pcall_(function()
-                    local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if h and pos then near = (h.Position - pos).Magnitude < 40 end
-                end)
-                local expired = MG.miniEnd and (MG.miniEnd - tick_()) <= 0
-                if not (near or expired) then task_wait(0.5); return end
+                if (tick_() - (MG.lastEntryTry or 0)) < 6 then task_wait(0.5); return end
+                MG.lastEntryTry = tick_()
                 LSM.standBusyT = tick_()
+                local pos = MG.entryPos()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
                 local started = false
                 local play = MG.findBtn("PLAY", true)
@@ -2645,4 +2646,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v18.31 loaded")
+rprint("sell lemons v18.32 loaded")
