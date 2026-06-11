@@ -1,4 +1,4 @@
--- [[ SELL LEMONS v18.21 — минигейм: чек = один клик и СТОП (курсор больше не дёргается), EXIT не жмём пока чек на экране ]] --
+-- [[ SELL LEMONS v18.22 — Cash Vine: поиск лозы по имени (Cosmic Cash Vine и т.п.) - вернулись READY/таймер ]] --
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -164,7 +164,7 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
-print("=== SELL LEMONS v18.21 ===")
+print("=== SELL LEMONS v18.22 ===")
 
 -- ==================== GUI v11: homesick (родная библиотека Матчи) ====================
 -- Вместо самодельного Drawing-гуи — homesick: окно, вкладки, тогглы с
@@ -1848,6 +1848,45 @@ local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawin
 local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
 
+-- v18.22: лоза переименовалась в "Cosmic Cash Vine" -> жёсткий путь Map.Sewer.
+-- CashVine больше не находил её (пропали и READY, и таймер). Ищем контейнер по
+-- "vine"/"cash" в имени и КЭШИРУЕМ. Поиск не чаще раза в 3с (полный обход дорог).
+function LSM.findVine()
+    local c = LSM.vineRef
+    if c and c.Parent then return c end
+    if (tick_() - (LSM.vineFindT or 0)) < 3 then return nil end
+    LSM.vineFindT = tick_()
+    local found
+    pcall_(function()
+        local map = Workspace:FindFirstChild("Map")
+        local sewer = map and map:FindFirstChild("Sewer")
+        -- 1) старое место Map.Sewer: точное имя -> "cash"+"vine" -> просто "vine"
+        if sewer then
+            found = sewer:FindFirstChild("CashVine")
+            if not found then
+                for _, d in ipairs_(sewer:GetChildren()) do
+                    local ln = tostring_(d.Name):lower()
+                    if ln:find("cash") and ln:find("vine") then found = d; break end
+                end
+            end
+            if not found then
+                for _, d in ipairs_(sewer:GetChildren()) do
+                    if tostring_(d.Name):lower():find("vine") then found = d; break end
+                end
+            end
+        end
+        -- 2) шире - весь Map (вдруг перенесли из Sewer)
+        if not found and map then
+            for _, d in ipairs_(map:GetDescendants()) do
+                local ln = tostring_(d.Name):lower()
+                if ln:find("cash") and ln:find("vine") then found = d; break end
+            end
+        end
+    end)
+    LSM.vineRef = found
+    return found
+end
+
 local function pollInput()
     if not ScriptActive then return end
     local nowA = tick_()
@@ -1980,15 +2019,30 @@ local function pollInput()
     -- Переход видим->невидим = момент сбора: настоящий старт 4ч кулдауна.
     local vReady
     pcall_(function()
+        local cv = LSM.findVine()
         local k = LSM.vineKeyRef
         if not (k and k.Parent) then
-            local map = Workspace:FindFirstChild("Map")
-            local sewer = map and map:FindFirstChild("Sewer")
-            local cv = sewer and sewer:FindFirstChild("CashVine")
             k = cv and cv:FindFirstChild("VineKey")
             LSM.vineKeyRef = k
         end
-        if k then vReady = (k.Transparency < 0.5) end
+        if k then
+            vReady = (k.Transparency < 0.5)
+        elseif cv then
+            -- v18.22: VineKey не нашёлся (мог переименоваться) -> READY по лейблам.
+            -- Тикающий таймер "Ч:ММ:СС" = кулдаун (не готова); видимый "READY"/
+            -- "HARVEST" без таймера = готова.
+            local hasTimer, hasReady = false, false
+            for _, d in ipairs_(cv:GetDescendants()) do
+                if tostring_(d.ClassName) == "TextLabel" then
+                    local t; pcall_(function() t = d.Text end)
+                    t = tostring_(t or "")
+                    if t:match("^%s*%d+:%d%d:%d%d%s*$") then hasTimer = true
+                    elseif t:upper():find("READY") or t:upper():find("HARVEST") then hasReady = true end
+                end
+            end
+            if hasTimer then vReady = false
+            elseif hasReady then vReady = true end
+        end
     end)
     if vReady ~= nil then
         if LSM.vineWasReady == true and vReady == false then
@@ -2025,9 +2079,7 @@ local function pollInput()
         if not vTimer and (tick_() - (LSM.vineScanT or 0)) > 3 then
             LSM.vineScanT = tick_()
             LSM.vineLblRef = nil
-            local map = Workspace:FindFirstChild("Map")
-            local sewer = map and map:FindFirstChild("Sewer")
-            local cv = sewer and sewer:FindFirstChild("CashVine")
+            local cv = LSM.findVine()
             if cv then
                 for _, d in ipairs_(cv:GetDescendants()) do
                     if d:IsA("TextLabel") then
@@ -2650,4 +2702,4 @@ end
 
 -- v18.19: версия в видимом логе - чтобы было видно, что raw-кэш GitHub (~5 мин)
 -- отдал СВЕЖИЙ скрипт, а не старый
-rprint("sell lemons v18.21 loaded")
+rprint("sell lemons v18.22 loaded")
