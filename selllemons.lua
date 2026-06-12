@@ -317,7 +317,7 @@ function FX.apply()
                 task_wait()
             end
         end
-        if FX.on and FX.gen == gen then rprint("[FPS] low graphics ON (" .. FX.n .. " changed)") end
+        if FX.on and FX.gen == gen then print("[FPS] low graphics ON (" .. FX.n .. " changed)") end
     end)
 end
 function FX.restore()
@@ -340,7 +340,7 @@ function FX.restore()
             if not ok then i = i + 1 end
             task_wait()
         end
-        rprint("[FPS] graphics restored (" .. n .. ")")
+        print("[FPS] graphics restored (" .. n .. ")")
     end)
 end
 
@@ -1591,7 +1591,7 @@ _wrap("buy-spy", function()
                         if d < 35 and (not bd or d < bd) then bd = d; best = v end
                     end
                 end
-                if not best then rprint("[BuySpy] рядом (<35) кнопок в СКАНЕ нет | папок=" .. #buttonsFolders .. " очередь=" .. (#localQueue - queueIndex + 1)); return end
+                if not best then print("[BuySpy] рядом (<35) кнопок в СКАНЕ нет | папок=" .. #buttonsFolders .. " очередь=" .. (#localQueue - queueIndex + 1)); return end
                 local key = getButtonKey(best) or "?"
                 local a = buyAttempt[key]
                 local inQ = false
@@ -1600,7 +1600,7 @@ _wrap("buy-spy", function()
                     if it and it.key == key then inQ = true; break end
                 end
                 local nm = "?"; pcall_(function() nm = best.Parent.Name end)
-                rprint(sformat("[BuySpy] %s d=%d | n=%s next_in=%s | grey=%s black=%s inQueue=%s ready=%s | очередь=%d",
+                print(sformat("[BuySpy] %s d=%d | n=%s next_in=%s | grey=%s black=%s inQueue=%s ready=%s | очередь=%d",
                     tostring_(nm), mfloor(bd or 0),
                     tostring_(a and a.n or 0),
                     a and sformat("%.1f", a.next - tick_()) or "-",
@@ -2336,13 +2336,13 @@ local function pollInput()
                     h.CFrame = CF(ret.X, ret.Y + 1, ret.Z)
                     h.AssemblyLinearVelocity = Vec3(0, 0, 0)
                     CFG.vineRet = nil
-                    rprint("[Vine] returned")
+                    print("[Vine] returned")
                 end
             else
                 CFG.vineRet = h.Position
                 h.CFrame = CF(39.7, -41.0, -77.5)
                 h.AssemblyLinearVelocity = Vec3(0, 0, 0)
-                rprint("[Vine] at the vine - press again to return")
+                print("[Vine] at the vine - press again to return")
             end
         end)
     end
@@ -2458,7 +2458,7 @@ local function pollInput()
             CFG.vineT = tick_()
             CFG.vineNotif = false
             _saveVineReady()
-            rprint("[Vine] collected -> 4h cooldown started")
+            print("[Vine] collected -> 4h cooldown started")
         end
         LSM.vineWasReady = vReady
     end
@@ -2695,7 +2695,7 @@ _wrap("auto-deal", function()
                         end)
                     end
                 end
-                rprint("[Deal] accepted: " .. btnText(best))
+                print("[Deal] accepted: " .. btnText(best))
                 task_wait(1)
             end)
         end
@@ -2818,7 +2818,7 @@ function RB.curFromAttr()
     end)
     if not RB.attrRawShown then
         RB.attrRawShown = true
-        rprint("[Rebirth] attr Investors raw=" .. tostring_(v):sub(1, 24) .. " type=" .. type(v))
+        print("[Rebirth] attr Investors raw=" .. tostring_(v):sub(1, 24) .. " type=" .. type(v))
     end
     local L, Z
     if type(v) == "number" then
@@ -2839,7 +2839,7 @@ function RB.curFromAttr()
     end
 
     if L and RB.curLog and L < RB.curLog - 6 then
-        rprint("[Rebirth] attr looks bogus (way below cache) -> fallback")
+        print("[Rebirth] attr looks bogus (way below cache) -> fallback")
         return nil, nil
     end
     if L then return L, false end
@@ -2918,7 +2918,7 @@ function RB.calibrate(gainLog, pLog, cashLog)
     if (not RB.earnLog) or cT > RB.earnLog then RB.earnLog = cT end
     RB.lastCashLog = cashLog
     RB.spentEstT = tick_()
-    rprint("[Rebirth] calibrated: total earned ~" .. fmtAbbr(cT))
+    print("[Rebirth] calibrated: total earned ~" .. fmtAbbr(cT))
 end
 
 function RB.computeDecision()
@@ -2981,7 +2981,7 @@ function RB.computeDecision()
     if (tick_() - (RB.diagT or 0)) >= 60 then
         RB.diagT = tick_()
         local offT = RB.numText(RB.node(RB.gui(), "Sidebar/Container/Investors/Offset"))
-        rprint("[RB peek] est=" .. RB.fmtPct(pct) .. "  gain~" .. (gainLog and fmtAbbr(gainLog) or "?")
+        print("[RB peek] est=" .. RB.fmtPct(pct) .. "  gain~" .. (gainLog and fmtAbbr(gainLog) or "?")
             .. "  cur=" .. (curLog and fmtAbbr(curLog) or (curZero and "0" or "?")) .. "(" .. tostring_(curSrc or "?") .. ")"
             .. "  cash=" .. fmtAbbr(cashLog) .. "  earned~" .. (RB.earnLog and fmtAbbr(RB.earnLog) or "?")
             .. "  offset='" .. tostring_(offT):sub(1, 24) .. "'")
@@ -3124,7 +3124,7 @@ function RB.confirmRebirth(cf)
         rprint("[Rebirth] confirmed (x" .. tostring_(RB.mult) .. ")")
     else
         RB.status = "confirm stuck - dismissed"
-        rprint("[Rebirth] confirm did not register, dismissing alert")
+        print("[Rebirth] confirm did not register, dismissing alert")
         RB.dismissAlert()
         RB.lastPeek = tick_()
     end
@@ -3210,7 +3210,7 @@ function RB.runCheck(g)
     end
     RB.prepClick()
     local sb = RB.node(g, "Sidebar/Container/Investors")
-    if not sb then RB.status = "Investors button not found"; rprint("[Rebirth] sidebar Investors missing"); return end
+    if not sb then RB.status = "Investors button not found"; print("[Rebirth] sidebar Investors missing"); return end
 
     if not RB.panelOpen(g) then
         local ok = false
@@ -3232,7 +3232,7 @@ function RB.runCheck(g)
         end
         if not ok then
             RB.go = false; RB.status = "couldn't open panel"
-            rprint("[Rebirth] panel didn't slide in (click eaten) - retry in 60s")
+            print("[Rebirth] panel didn't slide in (click eaten) - retry in 60s")
             return
         end
     end
@@ -3262,18 +3262,18 @@ function RB.runCheck(g)
         curLog = RB.strictLog(curT); RB.curLog = curLog
     elseif RB.curLog then
         curLog = RB.curLog
-        rprint("[Rebirth] cur garbled -> using cached")
+        print("[Rebirth] cur garbled -> using cached")
     else
 
         local aLog = RB.curFromAttr()
         if aLog then
             curLog = aLog; RB.curLog = aLog
-            rprint("[Rebirth] investors source = attribute (" .. fmtAbbr(aLog) .. ")")
+            print("[Rebirth] investors source = attribute (" .. fmtAbbr(aLog) .. ")")
         else
         RB.go = false
         local raw = tostring_(curT)
         RB.status = "cur=[" .. (raw == "" and "<пусто>" or raw:sub(1, 16)) .. "](" .. #raw .. ")"
-        rprint("[Rebirth] Amount unreadable & no cache, retry in 8s")
+        print("[Rebirth] Amount unreadable & no cache, retry in 8s")
         RB.closePanel(g)
 
         RB.lastPeek = tick_() - (RB.peekEvery or 60) + 8
@@ -3305,7 +3305,7 @@ function RB.runCheck(g)
     end
     if not cf then
         RB.status = "confirm popup not found"
-        rprint("[Rebirth] REBIRTH pressed, no confirm popup - retry in 60s")
+        print("[Rebirth] REBIRTH pressed, no confirm popup - retry in 60s")
         RB.dismissAlert(); RB.lastPeek = tick_()
         if (tick_() - (RB.lastReb or 0)) >= 5 then RB.closePanel(g) end
         return
@@ -3319,7 +3319,7 @@ function RB.runCheck(g)
             RB.calibrate(trueGain, curLog, cashLog)
             RB.go = false; RB.goN = 0
             RB.status = sformat("x%d  |  %s  |  wait", mult, RB.lastInfo)
-            rprint("[Rebirth] popup says " .. RB.lastInfo .. " (early) - calibrated, waiting")
+            print("[Rebirth] popup says " .. RB.lastInfo .. " (early) - calibrated, waiting")
             RB.dismissAlert(); RB.closePanel(g)
             RB.lastPeek = tick_()
             return
@@ -3328,7 +3328,7 @@ function RB.runCheck(g)
 
         if not (estGain and estGain >= th) then
             RB.status = "popup unreadable - safe abort"
-            rprint("[Rebirth] popup gain unreadable, est below threshold - abort, retry in 60s")
+            print("[Rebirth] popup gain unreadable, est below threshold - abort, retry in 60s")
             RB.dismissAlert(); RB.closePanel(g); RB.lastPeek = tick_()
             return
         end
