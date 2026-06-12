@@ -405,7 +405,7 @@ local function toggleFeature(slot)
     print("[Hub] toggle slot " .. slot)
 end
 
-local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Trading", "Lemon Labs", "Lemon Robotics", "Lemon Republic"}
+local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Trading", "Lemon Labs", "Lemon Robotics", "Lemon Republic", "LemonX"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }
 
@@ -588,7 +588,7 @@ local function _standUpgradePos(folder, nm)
     return pos
 end
 
-local STAND_ORDER = {"stand", "dash", "depot", "trading", "labs", "robotics", "republic"}
+local STAND_ORDER = {"stand", "dash", "depot", "trading", "labs", "robotics", "republic", "lemonx"}
 local function standRank(low)
     for i = 1, #STAND_ORDER do
         if low:find(STAND_ORDER[i], 1, true) then return i end
@@ -606,7 +606,7 @@ local function getStandLocations()
         local nm = tostring_(folder.Name)
         local low = nm:lower()
         local rank = standRank(low)
-        if rank < 99 and not low:find("lemonx") then
+        if rank < 99 and not low:find("ground") then
 
             local pos = _standUpgradePos(folder, nm)
             local lpos = nil
@@ -677,7 +677,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Left")
 
-    pcall_(function() window:setBadge("Sell Lemons v19.5  |  by Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v19.6  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -839,6 +839,28 @@ local function buildButtonsCache()
     for _, cat in ipairs_(purchases:GetChildren()) do
         hookPurchaseCategory(cat)
     end
+
+    pcall_(function()
+        for _, d in ipairs_(purchases:GetDescendants()) do
+            if d.Name == "Button" and d:IsA("BasePart") then
+                local chain, cur = {}, d
+                for _ = 1, 12 do
+                    local p = cur.Parent
+                    if not p or tostring_(p.Name) == "Purchases" then break end
+                    chain[#chain + 1] = p
+                    cur = p
+                end
+                local hasButtons = false
+                for i = 1, #chain do
+                    if tostring_(chain[i].Name) == "Buttons" then hasButtons = true break end
+                end
+                if not hasButtons and #chain >= 2 then
+                    local sub = chain[#chain - 1]
+                    if tostring_(sub.ClassName) == "Folder" then addButtonsFolder(sub) end
+                end
+            end
+        end
+    end)
     pcall_(function()
         purchases.ChildAdded:Connect(function(newCat)
             hookPurchaseCategory(newCat)
@@ -879,6 +901,17 @@ local function getButtonsRealTime()
                 end
             end
         end
+    end
+
+    if #temp <= 60 then
+        local byKey = {}
+        for i = 1, #temp do
+            local k = getButtonKey(temp[i])
+            if k then byKey[k] = temp[i] end
+        end
+        _bScan.byKey = byKey
+    else
+        _bScan.byKey = nil
     end
     _bScan.list = temp
     _bScan.t = now
@@ -1318,17 +1351,22 @@ _wrap("autobuy-worker", function()
             continue
         end
 
+        getButtonsRealTime()
         local item = nil
         local lq  = localQueue
         while queueIndex <= #lq do
             local candidate = lq[queueIndex]
             queueIndex = queueIndex + 1
 
-            if candidate and candidate.btn and candidate.btn.Parent then
-                local key = candidate.key
-                if buyReady(key, candidate.btn) and not isGreyedOut(candidate.btn) and not isBlacklisted(key, candidate.btn) then
-                    item = candidate
-                    break
+            if candidate and candidate.key then
+                local live = (_bScan.byKey and _bScan.byKey[candidate.key]) or candidate.btn
+                if live and live.Parent then
+                    local key = candidate.key
+                    if buyReady(key, live) and not isGreyedOut(live) and not isBlacklisted(key, live) then
+                        candidate.btn = live
+                        item = candidate
+                        break
+                    end
                 end
             end
         end
@@ -1343,11 +1381,15 @@ _wrap("autobuy-worker", function()
                     while queueIndex <= #lq do
                         local candidate = lq[queueIndex]
                         queueIndex = queueIndex + 1
-                        if candidate and candidate.btn and candidate.btn.Parent then
-                            local key = candidate.key
-                            if buyReady(key, candidate.btn) and not isGreyedOut(candidate.btn) and not isBlacklisted(key, candidate.btn) then
-                                item = candidate
-                                break
+                        if candidate and candidate.key then
+                            local live = (_bScan.byKey and _bScan.byKey[candidate.key]) or candidate.btn
+                            if live and live.Parent then
+                                local key = candidate.key
+                                if buyReady(key, live) and not isGreyedOut(live) and not isBlacklisted(key, live) then
+                                    candidate.btn = live
+                                    item = candidate
+                                    break
+                                end
                             end
                         end
                     end
@@ -1827,6 +1869,12 @@ local function processSnapshot(snapshot, hrp)
             if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then break end
             if not LSM.zoomedIn then break end
             if not _windowFocused() then break end
+
+            if (tick_() - (LSM.zoomInT or 0)) >= 3 and type(mousescroll) == "function" then
+                LSM.zoomInT = tick_()
+                LSM.lastBot = tick_()
+                pcall_(function() for _ = 1, 8 do mousescroll(CFG.zoomStep); task_wait(0.01) end end)
+            end
             local v = fruits[i]
             if v and v:IsDescendantOf(Workspace) then
                 local lk    = lemonKey(v)
@@ -1902,8 +1950,16 @@ _wrap("lemon-farm", function()
 
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
 
-            if not LSM.zoomedIn then
+            if not LSM.zoomedIn or (tick_() - (LSM.zoomInT or 0)) >= 3 then
+                LSM.zoomInT = tick_()
                 pcall_(function() camera = Workspace.CurrentCamera end)
+
+                pcall_(function() if type(mouse2release) == "function" then mouse2release() end end)
+
+                pcall_(function()
+                    local vp = camera.ViewportSize
+                    if vp then mousemoveabs(mfloor(vp.X / 2), mfloor(vp.Y / 2)) end
+                end)
                 LSM.zoom(1)
                 pcall_(function()
                     local chrA = player.Character
@@ -2349,7 +2405,7 @@ _wrap("auto-deal", function()
     end
     local function isReject(s)
         s = s:lower():gsub("[%s%.%!]", "")
-        return s == "no" or s == "nvm"
+        return s == "no" or s == "nvm" or s == "bye"
     end
     local function shownB(o)
         local cur = o
@@ -3238,4 +3294,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v19.5 loaded  |  by Inspecttor")
+rprint("sell lemons v19.6 loaded  |  by Inspecttor")
