@@ -107,7 +107,7 @@ local function buyReady(key, v)
         buyAttempt[key] = nil
         return true
     end
-    if a.n >= 6 then return false end
+
     return tick_() >= a.next
 end
 local function markBuyFail(key, v)
@@ -117,6 +117,7 @@ local function markBuyFail(key, v)
     a.n = a.n + 1
     local d = 0.35 * (2 ^ (a.n - 1))
     if d > 4 then d = 4 end
+    if a.n >= 6 then d = 20 end
     a.next = tick_() + d
 end
 
@@ -133,15 +134,37 @@ end
 local myTycoon = nil
 local function findMyTycoon()
     local pname = player.Name
+
     for _, tycoon in ipairs_(Workspace:GetChildren()) do
-        if tycoon.Name:find("Tycoon") then
+        if tostring_(tycoon.Name):find("Tycoon") then
             local owner = tycoon:FindFirstChild("Owner")
             if owner then
-                local ownerValue = nil
-                pcall_(function() ownerValue = tostring_(owner.Value) end)
-                if ownerValue and ownerValue:find(pname) then return tycoon end
+                local ov; pcall_(function() ov = owner.Value end)
+                if ov == player or (ov and tostring_(ov):find(pname, 1, true)) then return tycoon end
             end
         end
+    end
+
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    local hp; pcall_(function() hp = hrp and hrp.Position end)
+    if hp then
+        local best, bestD
+        for _, tycoon in ipairs_(Workspace:GetChildren()) do
+            if tostring_(tycoon.Name):find("Tycoon") then
+                local pur = tycoon:FindFirstChild("Purchases")
+                if pur then
+                    pcall_(function()
+                        for _, d in ipairs_(pur:GetDescendants()) do
+                            if d.Name == "Button" and d:IsA("BasePart") and d.Parent then
+                                local dd = (d.Position - hp).Magnitude
+                                if not bestD or dd < bestD then bestD = dd; best = tycoon end
+                            end
+                        end
+                    end)
+                end
+            end
+        end
+        if best and bestD and bestD < 300 then return best end
     end
     return nil
 end
@@ -358,9 +381,11 @@ local function syncToUI()
     pcall_(function() if UIRef.t.LemonFarm then UIRef.t.LemonFarm:SetValue(lemonFarmActive) end end)
     pcall_(function() if UIRef.t.AutoStand then UIRef.t.AutoStand:SetValue(autoStandActive) end end)
     pcall_(function() if UIRef.t.CashFarm  then UIRef.t.CashFarm:SetValue(cashFarmActive)   end end)
+    pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:SetValue(autoRebirthActive) end end)
 end
 local function stopAll()
-    autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive = false, false, false, false
+
+    autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive, autoRebirthActive = false, false, false, false, false
     resetBuyBlacklist()
     syncToUI()
     pcall_(function() if S.saveState then S.saveState() end end)
@@ -383,6 +408,12 @@ end
 local STAND_NAMES = {"Lemon Stand", "LemonDash", "Lemon Depot", "Lemon Trading", "Lemon Labs", "Lemon Robotics", "Lemon Republic"}
 local standEnabled = {}
 local MG = { active = false, enabled = {} }
+
+MG.lemBusy = function()
+    if not MG.active then return false end
+    local t = tick_()
+    return (t - (MG.busyT or 0)) < 4 or (t - (MG.entryT or 0)) < 4
+end
 
 local RB = { mult = 2, lastPeek = 0, lastReb = 0, goSince = 0, peekEvery = 60, go = false, status = "off" }
 
@@ -612,6 +643,8 @@ if homesick then
 
     UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
         autoBuyActive = val
+
+        if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end) end
         S.saveState()
         print("[Hub] toggle AutoBuy = " .. tostring_(val))
     end):addKeybind("1", "Toggle", true, function() end)
@@ -644,7 +677,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Left")
 
-    pcall_(function() window:setBadge("Sell Lemons v19.3  |  by Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v19.5  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -667,7 +700,12 @@ if homesick then
 
     UIRef.t.AutoRebirth = right:addToggle("autoRebirth", "Auto Rebirth", false, function(val)
         autoRebirthActive = val
-        if not val then RB.go = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil end
+        if val then
+
+            RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
+        else
+            RB.go = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil
+        end
         print("[Hub] toggle AutoRebirth = " .. tostring_(val))
     end)
     pcall_(function()
@@ -996,6 +1034,13 @@ local lastCashCount   = 0
 
 local LSM = { mode = "classic", annAfk = false, annBuy = false }
 
+pcall_(function()
+    player.CharacterAdded:Connect(function()
+        LSM.zoomedIn = false
+        pcall_(function() camera = Workspace.CurrentCamera end)
+    end)
+end)
+
 local ANTIGRAV_VEL = Vec3(0, 2, 0)
 RunService.RenderStepped:Connect(function()
     if not ScriptActive then return end
@@ -1174,6 +1219,25 @@ local function _anyLiveButtons()
     return live
 end
 
+local function _anyBuyableNowButtons()
+    local now = tick_()
+    if _bScan.buyNowT and (now - _bScan.buyNowT) < 0.15 then return _bScan.buyNow end
+    local live = false
+    local buttons = getButtonsRealTime()
+    for _, v in ipairs_(buttons) do
+        local key = getButtonKey(v)
+        if key then
+            if not isBlacklisted(key, v) and not isGreyedOut(v) and buyReady(key, v) then
+                live = true
+                break
+            end
+        end
+    end
+    _bScan.buyNowT = now
+    _bScan.buyNow = live
+    return live
+end
+
 local STAND_E_SPAM_DURATION = 1.5
 
 local function runLocationsPass(firstRun)
@@ -1188,14 +1252,18 @@ local function runLocationsPass(firstRun)
         end
     end
 
+    LSM.standBusyT = tick_()
+    LSM.standPassT = tick_()
+
     LSM.zoom(-1)
 
     local tilted = LSM.tiltDown()
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
+        LSM.standPassT = tick_()
         if standEnabled[s.name] ~= false then
-            if autoBuyActive and _anyLiveButtons() then return "done" end
+            if autoBuyActive and _anyBuyableNowButtons() then return "yield" end
             if _tpHrpTo(s.pos) then
                 task_wait(0.05)
 
@@ -1334,6 +1402,13 @@ _wrap("autobuy-worker", function()
             pcall_(function()
                 gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
             end)
+
+            if not gone then
+                pcall_(function()
+                    local model = btn.Parent
+                    if model and model:GetAttribute("Purchased") == true then gone = true end
+                end)
+            end
             if gone then bought = true; break end
 
             if isGreyedOut(btn) then break end
@@ -1560,8 +1635,14 @@ end
 function LSM.zoom(dir)
     if LSM.mode == "cd" or LSM.mode == "sig" then return end
     if type(mousescroll) ~= "function" then return end
+
+    if not _windowFocused() then return end
+
+    LSM.zoomGen = (LSM.zoomGen or 0) + 1
+    local gen = LSM.zoomGen
     LSM.zoomedIn = dir > 0
     for _ = 1, CFG.zoomTicks do
+        if LSM.zoomGen ~= gen then return end
         LSM.lastBot = tick_()
         pcall_(mousescroll, CFG.zoomStep * dir)
         task_wait(0.02)
@@ -1604,7 +1685,7 @@ function LSM.returnHome()
 
     LSM.zoom(-1)
     LSM.lastBot = tick_()
-    if type(mousescroll) == "function" then
+    if type(mousescroll) == "function" and _windowFocused() then
         pcall_(function()
             for _ = 1, 12 do mousescroll(-CFG.zoomStep); task_wait(0.012) end
         end)
@@ -1624,7 +1705,9 @@ local function processLemon(v, hrp)
     if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
 
     if not _windowFocused() then return false end
-    if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 then return false end
+    if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then return false end
+
+    if not LSM.zoomedIn then return false end
 
     local origSize, origTransp, origCanColl = nil, nil, nil
     local hitboxApplied = false
@@ -1656,6 +1739,7 @@ local function processLemon(v, hrp)
         local vps = camera.ViewportSize
         local cx, cy = vps.X * 0.5, vps.Y * 0.5
         for _ = 1, 6 do
+            if not LSM.zoomedIn then break end
             local sp, on = WorldToScreen(vp)
             if on and sp and mabs(sp.X - cx) < vps.X * 0.18 and mabs(sp.Y - cy) < vps.Y * 0.18 then
                 break
@@ -1722,7 +1806,9 @@ local function processSnapshot(snapshot, hrp)
         if not lemonFarmActive then break end
         if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
         if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
-        if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 then break end
+        if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then break end
+        if not LSM.zoomedIn then break end
+        if not _windowFocused() then break end
         local fruits = groups[tree]
         local excludeSet = {}
         for i = 1, #fruits do excludeSet[fruits[i]] = true end
@@ -1738,7 +1824,9 @@ local function processSnapshot(snapshot, hrp)
             if not lemonFarmActive then break end
             if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
             if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
-            if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 then break end
+            if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then break end
+            if not LSM.zoomedIn then break end
+            if not _windowFocused() then break end
             local v = fruits[i]
             if v and v:IsDescendantOf(Workspace) then
                 local lk    = lemonKey(v)
@@ -1810,8 +1898,9 @@ _wrap("lemon-farm", function()
             LSM.annAfk = false
             LSM.returnHome()
         end
-        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4
-        if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow then
+        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy()
+
+        if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
 
             if not LSM.zoomedIn then
                 pcall_(function() camera = Workspace.CurrentCamera end)
@@ -2210,19 +2299,26 @@ local function pollInput()
             local remP = (RB.peekEvery or 60) - (tick_() - (RB.lastPeek or 0))
             if remP < 0 then remP = 0 end
             if RB.lastInfo then
-                txt5 = sformat("x%d  |  %s  |  check in %ds", RB.mult or 2, RB.lastInfo, mfloor(remP) + 1)
+                txt5 = sformat("x%d  |  %s  |  %ds", RB.mult or 2, RB.lastInfo, mfloor(remP) + 1)
             else
-                txt5 = sformat("x%d  |  check in %ds", RB.mult or 2, mfloor(remP) + 1)
+                txt5 = sformat("x%d  |  %ds", RB.mult or 2, mfloor(remP) + 1)
             end
         elseif RB.status == "cooldown" then
             local remC = 30 - (tick_() - (RB.lastReb or 0))
             if remC < 0 then remC = 0 end
-            txt5 = sformat("rebirthed!  next in %ds", mfloor(remC) + 1)
+            txt5 = sformat("done  |  %ds", mfloor(remC) + 1)
         else
             txt5 = tostring_(RB.status or "...")
         end
         statusTx5.Text = "rebirth  |  " .. txt5
-        statusTx5.Color = RB.go and C3rgb(255, 226, 58) or C3rgb(222, 210, 170)
+
+        if RB.go then
+            statusTx5.Color = RB.pctColor(100)
+        elseif RB.pct then
+            statusTx5.Color = RB.pctColor(RB.pct)
+        else
+            statusTx5.Color = C3rgb(222, 210, 170)
+        end
         statusTx5.Position = Vec2(vx, sy); sy = sy + 20
         statusTx5.Visible = true
     else
@@ -2348,6 +2444,13 @@ _wrap("auto-deal", function()
 end)
 
 local _log10 = math.log10 or function(x) return math.log(x) / math.log(10) end
+
+local function _logAdd(a, b)
+    if not a then return b end
+    if not b then return a end
+    local hi, lo = (a > b) and a or b, (a > b) and b or a
+    return hi + _log10(1 + 10 ^ (lo - hi))
+end
 local HUGE_EXP = {}
 do
     local BASE = {[0]="thousand","million","billion","trillion","quadrillion","quintillion","sextillion","septillion","octillion","nonillion","decillion","undecillion","duodecillion","tredecillion","quattuordecillion","quindecillion","sexdecillion","septendecillion","octodecillion","novemdecillion"}
@@ -2380,6 +2483,26 @@ local function parseHugeLog(s)
     return nil
 end
 
+local HUGE_ABBR_IDX = {}
+do
+    local BASE = {[0]="K","M","B","T","Qd","Qn","Sx","Sp","Oc","No","Dc","Ud","Dd","Td","Qtd","Qnd","Sxd","Spd","Ocd","Nod"}
+    local ROOT = {[2]="Vg",[3]="Tg",[4]="Qdg",[5]="Qng",[6]="Sxg",[7]="Spg",[8]="Ocg",[9]="Nog",[10]="Ce"}
+    local PREF = {[0]="",[1]="U",[2]="D",[3]="T",[4]="Qt",[5]="Qn",[6]="Sx",[7]="Sp",[8]="Oc",[9]="No"}
+    for i = 0, 19 do HUGE_ABBR_IDX[i] = BASE[i] end
+    for i = 20, 100 do
+        local r = ROOT[i // 10]
+        if r then local p = PREF[i % 10] or ""; HUGE_ABBR_IDX[i] = (p == "") and r or (p .. r:lower()) end
+    end
+end
+
+local function fmtAbbr(L)
+    if not L then return "?" end
+    if L < 3 then return sformat("%.0f", 10 ^ (L > 0 and L or 0)) end
+    local grp = mfloor(mfloor(L) / 3)
+    local ab = HUGE_ABBR_IDX[grp - 1] or ("e" .. (grp * 3))
+    return sformat("%.2f", 10 ^ (L - grp * 3)) .. ab
+end
+
 function RB.node(root, p)
     local cur = root
     for seg in p:gmatch("[^/]+") do
@@ -2401,10 +2524,21 @@ function RB.text(node)
     return tostring_(t or "")
 end
 
+function RB.numText(node)
+    if not node then return "" end
+    local best = ""
+    for _, prop in ipairs_({"ContentText", "Text"}) do
+        local t; pcall_(function() t = node[prop] end)
+        t = tostring_(t or "")
+        if parseHugeLog(t) or RB.isZero(t) then return t end
+        if t ~= "" and best == "" then best = t end
+    end
+    return best
+end
+
 function RB.shortStr(s)
-    if not s then return "?" end
-    local mant, suf = tostring_(s):gsub("<[^>]*>", " "):match("([%d][%d%.,]*)%s*(%a+)")
-    if mant and suf then return mant .. " " .. suf end
+    local L = parseHugeLog(s)
+    if L then return fmtAbbr(L) end
     return (tostring_(s):match("[%d][%d%.,]*")) or "?"
 end
 
@@ -2467,111 +2601,244 @@ function RB.click(node)
     return true
 end
 
-function RB.doRebirth(g)
-    local rb = RB.node(g, "InvestorsMenu/Body/Rebirth")
-    if not rb then RB.status = "REBIRTH button not found"; rprint("[Rebirth] panel REBIRTH button missing"); return end
-    RB.prepClick()
-    RB.click(rb)
-    local cf
-    for _ = 1, 8 do
-        task_wait(0.5)
-        RB.busyT = tick_()
-        if RB.alertMsg():upper():find("REBIRTH") then cf = RB.findConfirm() end
-        if cf then break end
+function RB.panelOpen(g)
+    local ap, vp
+    pcall_(function()
+        local b = RB.node(g, "InvestorsMenu/Body/Rebirth")
+        ap = b and b.AbsolutePosition
+        vp = camera.ViewportSize
+    end)
+    if not ap or not vp then return false end
+    return ap.X > 1 and ap.X < vp.X * 0.85
+end
+
+function RB.gainFromMsg(msg)
+    local m = tostring_(msg):gsub("<[^>]*>", " ")
+    local seg = m:match("[Ff]or%s+([%d][%d%.,]*%s*%a+)") or m
+    return parseHugeLog(seg)
+end
+
+function RB.dismissAlert()
+    local pg = getPlayerGui()
+    local imp; pcall_(function() imp = pg and pg:FindFirstChild("Important") end)
+    if not imp then return end
+    for _ = 1, 5 do
+        if not RB.findConfirm() then return end
+        local x = RB.node(imp, "Alert/Main/Close")
+        if x then RB.click(x) end
+        task_wait(0.35); RB.busyT = tick_()
     end
-    if not cf then
-        RB.status = "confirm popup didn't open"
-        rprint("[Rebirth] confirm buttons not found after REBIRTH click")
-        RB.lastPeek = tick_()
-        return
-    end
+end
+
+function RB.confirmRebirth(cf)
+    if not autoRebirthActive then RB.status = "off"; return end
     local cashBefore = RB.cashLog()
     RB.click(cf)
     local done = false
     for i = 1, 2 do
-        task_wait(1.2)
-        RB.busyT = tick_()
+        task_wait(1.2); RB.busyT = tick_()
         local cashNow = RB.cashLog()
-
-        if not cashBefore or not cashNow or cashNow < cashBefore - 3 then done = true; break end
+        if cashBefore and cashNow and cashNow < cashBefore - 3 then done = true; break end
+        if not RB.findConfirm() then done = true; break end
         if i == 1 then RB.click(cf) end
     end
     if done then
-        RB.lastReb = tick_()
-        RB.lastPeek = tick_()
-        RB.goSince = 0
-        RB.go = false
+        RB.lastReb = tick_(); RB.lastPeek = tick_(); RB.goSince = 0; RB.go = false
+
+        if RB.curLog and RB.pendGain then RB.curLog = _logAdd(RB.curLog, RB.pendGain) end
+
+        pcall_(function()
+            resetBuyBlacklist()
+            localQueue = {}; queueIndex = 1
+            task_wait(3)
+            buildButtonsCache()
+        end)
         RB.status = "REBIRTHED!"
         rprint("[Rebirth] confirmed (x" .. tostring_(RB.mult) .. ")")
     else
-        RB.status = "confirm click didn't register"
-        rprint("[Rebirth] confirm clicked but cash did not reset")
+        RB.status = "confirm stuck - dismissed"
+        rprint("[Rebirth] confirm did not register, dismissing alert")
+        RB.dismissAlert()
         RB.lastPeek = tick_()
     end
 end
 
-function RB.tick()
+function RB.isZero(s)
+    s = tostring_(s or ""):gsub("<[^>]*>", "")
+    return s:match("^[%s%$]*0[%.,]?0*%s*$") ~= nil
+end
+function RB.decide(curT, gainT)
+    local curLog, gainLog = parseHugeLog(curT), parseHugeLog(gainT)
 
+    if not gainLog then
+        if RB.isZero(gainT) then return false, 0 end
+        return nil
+    end
+    if not curLog then
+        if RB.isZero(curT) then return true, 100 end
+        return nil
+    end
+    local th = _log10(math.max(1, (RB.mult or 2) - 1)) + curLog
+
+    return (gainLog >= th), math.min(999, 10 ^ (gainLog - th) * 100)
+end
+
+function RB.fmtPct(p)
+    if not p then return "?" end
+    if p >= 100 then return "100%" end
+    if p < 0.1 then return "<0.1%" end
+    return sformat("%.1f%%", p)
+end
+
+function RB.pctColor(p)
+    p = p or 0
+    if p < 0 then p = 0 elseif p > 100 then p = 100 end
+    local r, g, b
+    if p < 50 then
+        local u = p / 50
+        r, g, b = 255, mfloor(45 + u * 170), 45
+    else
+        local u = (p - 50) / 50
+        r, g, b = mfloor(255 - u * 210), mfloor(215 + u * 20), mfloor(45 + u * 50)
+    end
+    return C3rgb(r, g, b)
+end
+
+function RB.closePanel(g)
+
+    for _ = 1, 6 do
+        if not RB.panelOpen(g) then return end
+        local close = RB.node(g, "InvestorsMenu/Close")
+        if close then RB.click(close) end
+        task_wait(0.45); RB.busyT = tick_()
+    end
+end
+
+function RB.ensureClosed(g)
+    g = g or RB.gui(); if not g then return end
+    RB.busyT = tick_()
+    if RB.findConfirm() then RB.dismissAlert() end
+    RB.closePanel(g)
+end
+
+function RB.runCheck(g)
+    RB.status = "checking..."
+    RB.prepClick()
+    local sb = RB.node(g, "Sidebar/Container/Investors")
+    if not sb then RB.status = "Investors button not found"; rprint("[Rebirth] sidebar Investors missing"); return end
+
+    if not RB.panelOpen(g) then
+        local ok = false
+        for _ = 1, 2 do
+            if not autoRebirthActive then return end
+            RB.click(sb)
+            for _ = 1, 6 do
+                task_wait(0.4); RB.busyT = tick_()
+                if RB.panelOpen(g) then ok = true; break end
+            end
+            if ok then break end
+        end
+        if not ok then
+            RB.go = false; RB.status = "couldn't open panel"
+            rprint("[Rebirth] panel didn't slide in (click eaten) - retry in 60s")
+            return
+        end
+    end
+
+    local curT
+    for _ = 1, 14 do
+        curT = RB.numText(RB.node(g, "InvestorsMenu/Body/Amount/Quantity"))
+        if parseHugeLog(curT) or RB.isZero(curT) then break end
+        task_wait(0.4); RB.busyT = tick_()
+    end
+    local curLog, curZero = nil, false
+    if RB.isZero(curT) then
+        curZero = true; RB.curLog = nil
+    elseif parseHugeLog(curT) then
+        curLog = parseHugeLog(curT); RB.curLog = curLog
+    elseif RB.curLog then
+        curLog = RB.curLog
+        rprint("[Rebirth] cur garbled -> using cached")
+    else
+        RB.go = false
+        local raw = tostring_(curT)
+        RB.status = "cur=[" .. (raw == "" and "<пусто>" or raw:sub(1, 16)) .. "](" .. #raw .. ")"
+        rprint("[Rebirth] Amount unreadable & no cache, raw len=" .. #raw)
+        RB.closePanel(g); RB.lastPeek = tick_(); return
+    end
+
+    local rbBtn = RB.node(g, "InvestorsMenu/Body/Rebirth")
+    if not rbBtn then RB.status = "REBIRTH button not found"; RB.closePanel(g); return end
+    RB.status = "reading gain..."
+    local cf, gainLog
+    for _ = 1, 3 do
+        if not autoRebirthActive then RB.dismissAlert(); RB.status = "off"; return end
+        if not cf then RB.click(rbBtn) end
+        for _ = 1, 6 do
+            task_wait(0.4); RB.busyT = tick_()
+            local msg = RB.alertMsg()
+            if msg:upper():find("REBIRTH") then
+                cf = RB.findConfirm()
+                if cf then gainLog = gainLog or RB.gainFromMsg(msg) end
+            end
+            if cf and gainLog then break end
+        end
+        if cf and gainLog then break end
+    end
+    if not (cf and gainLog) then
+        RB.status = "couldn't read gain"
+        rprint("[Rebirth] rebirth popup / gain not readable - retry in 60s")
+        RB.dismissAlert(); RB.closePanel(g)
+        RB.lastPeek = tick_(); return
+    end
+
+    local mult = RB.mult or 2
+    local go, pct
+    if curZero then
+        go, pct = true, 100
+    else
+        local th = _log10(math.max(1, mult - 1)) + curLog
+        go = gainLog >= th
+        pct = math.min(999, 10 ^ (gainLog - th) * 100)
+    end
+    RB.pendGain = gainLog
+    RB.go = go; RB.pct = pct
+    RB.lastInfo = RB.fmtPct(pct)
+    RB.status = sformat("x%d  |  %s  |  %s", mult, RB.lastInfo, go and "GO" or "wait")
+
+    if go and autoRebirthActive then
+        RB.confirmRebirth(cf)
+    else
+        RB.dismissAlert()
+    end
+
+    if (tick_() - (RB.lastReb or 0)) >= 5 then RB.closePanel(g) end
+end
+
+function RB.tick()
     local rmb = false
     pcall_(function() if type(ismouse2pressed) == "function" then rmb = ismouse2pressed() end end)
     if rmb or not _windowFocused() then return end
     local now = tick_()
     if (now - (RB.lastReb or 0)) < 30 then RB.go = false; RB.status = "cooldown"; return end
 
-    local who
-    if MG.active and (now - (MG.busyT or 0)) < 5 then who = "minigame" end
-    if who then RB.go = false; RB.goSince = 0; RB.status = "waiting: " .. who; return end
+    if (now - (S.lastUser or 0)) < 5 then RB.go = false; RB.status = "idle"; return end
 
+    if MG.active and (now - (MG.busyT or 0)) < 5 then RB.go = false; RB.status = "waiting: minigame"; return end
+    if autoStandActive and (now - (LSM.standPassT or 0)) < 3 then RB.go = false; RB.status = "waiting: auto stand"; return end
+    if (now - (RB.lastPeek or 0)) < (RB.peekEvery or 60) then
+        RB.go = false; RB.status = "idle"
+
+        local g = RB.gui()
+        if g and (RB.panelOpen(g) or RB.findConfirm()) then RB.ensureClosed(g) end
+        return
+    end
     local g = RB.gui()
-    if not g then RB.go = false; RB.status = "Rebirth gui not found"; return end
-    local menu = RB.node(g, "InvestorsMenu")
-    local vis; pcall_(function() vis = menu and menu.Visible end)
-
-    local isOpen
-    if vis == true then isOpen = true
-    elseif vis == false then isOpen = false
-    else isOpen = (now - (RB.openedAt or -1e9)) < 8 end
-
-    if not isOpen then
-        RB.go = false
-        if (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then
-            RB.lastPeek = now
-            RB.prepClick()
-            local sb = RB.node(g, "Sidebar/Container/Investors")
-            if sb then RB.click(sb); RB.openedAt = now; RB.status = "opening panel..."
-            else RB.status = "Investors button not found"; rprint("[Rebirth] sidebar Investors missing") end
-        else
-            RB.status = "idle"
-        end
-        return
-    end
-
-    RB.busyT = now
-    local curT  = RB.text(RB.node(g, "InvestorsMenu/Body/Amount/Quantity"))
-    local gainT = RB.text(RB.node(g, "InvestorsMenu/Body/Potential/Quantity"))
-    local curLog, gainLog = parseHugeLog(curT), parseHugeLog(gainT)
-    if not (curLog and gainLog) then
-        RB.go = false
-        RB.status = "panel open, can't read numbers"
-        return
-    end
-    local mult = RB.mult or 2
-    local go = gainLog >= (_log10(math.max(1, mult - 1)) + curLog)
-    RB.go = go
-    RB.lastInfo = sformat("+%s / have %s", RB.shortStr(gainT), RB.shortStr(curT))
-    RB.status = sformat("x%d  |  %s  %s", mult, RB.lastInfo, go and "-> GO" or "(wait)")
-    if go then
-
-        if (RB.goSince or 0) == 0 then RB.goSince = now end
-        if (now - RB.goSince) >= 1.6 then RB.doRebirth(g); RB.busyT = 0 end
-    else
-        RB.goSince = 0
-        local close = RB.node(g, "InvestorsMenu/Close")
-        if close then RB.prepClick(); RB.click(close) end
-        RB.busyT = 0
-        RB.openedAt = nil
-        RB.lastPeek = now
-    end
+    if not g then RB.status = "Rebirth gui not found"; return end
+    RB.lastPeek = now
+    pcall_(function() RB.runCheck(g) end)
+    RB.busyT = 0
+    RB.openedAt = nil
 end
 _wrap("auto-rebirth", function()
     while ScriptActive do
@@ -2873,8 +3140,11 @@ _wrap("auto-minigame", function()
                 end
 
                 if (tick_() - (MG.lastEntryTry or 0)) < 6 then task_wait(0.5); return end
+
+                if (tick_() - (RB.busyT or 0)) < 4 then task_wait(0.5); return end
                 MG.lastEntryTry = tick_()
                 LSM.standBusyT = tick_()
+                MG.entryT = tick_()
                 local pos = MG.entryPos()
                 if pos then pcall_(function() _tpHrpTo(pos) end) end
                 local started = false
@@ -2882,6 +3152,7 @@ _wrap("auto-minigame", function()
                 if play then MG.click(play) end
                 for _ = 1, 12 do
                     if not MG.active then break end
+                    MG.entryT = tick_()
                     if MG.findBtn("PICK") or MG.findBtn("CHEER") then started = true; break end
                     keypress(0x45); task_wait(0.04); keyrelease(0x45); task_wait(0.06)
                 end
@@ -2915,8 +3186,18 @@ _wrap("auto-stand", function()
             end
         end
 
-        if autoBuyActive and _anyLiveButtons() then
+        if autoBuyActive and _anyBuyableNowButtons() then
             task_wait(0.3)
+            continue
+        end
+
+        if (tick_() - (RB.busyT or 0)) < 4 then
+            task_wait(0.5)
+            continue
+        end
+
+        if MG.lemBusy() then
+            task_wait(0.5)
             continue
         end
 
@@ -2924,6 +3205,15 @@ _wrap("auto-stand", function()
         firstRun = false
         if res == "off" then
             task_wait(0.05)
+            continue
+        end
+
+        if res == "yield" then
+            local w0 = tick_()
+            while ScriptActive and autoStandActive and autoBuyActive
+                  and _anyBuyableNowButtons() and (tick_() - w0) < 15 do
+                task_wait(0.3)
+            end
             continue
         end
 
@@ -2948,4 +3238,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v19.3 loaded  |  by Inspecttor")
+rprint("sell lemons v19.5 loaded  |  by Inspecttor")
