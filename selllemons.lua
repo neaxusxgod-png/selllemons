@@ -3808,10 +3808,3 @@ _G.MatchaCleanup = function()
 end
 
 rprint("sell lemons v20 loaded  |  by Inspecttor")
-
-pcall_(function()
-    if type(memory_read) ~= "function" then
-        notify("Enable Unsafe LuaU in Matcha settings! Auto Buy may lag or freeze without it", "Sell Lemons", 9)
-        rprint("[Hub] WARNING: Unsafe LuaU is OFF - enable it in Matcha settings (Auto Buy may lag)")
-    end
-end)
