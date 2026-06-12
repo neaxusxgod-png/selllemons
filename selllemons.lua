@@ -2974,7 +2974,8 @@ function RB.computeDecision()
     RB.go = fire
     RB.goN = fire and ((RB.goN or 0) + 1) or 0
     RB.pct = pct
-    RB.lastInfo = (RB.spentEstT and "" or "~") .. RB.fmtPct(pct)
+
+    RB.lastInfo = ((RB.spentEstT or pct < 2) and "" or "~") .. RB.fmtPct(pct)
     RB.status = sformat("x%d  |  %s  |  %s", RB.mult or 2, RB.lastInfo,
         (pct >= 100) and "GO" or (fire and "verify" or "wait"))
 
