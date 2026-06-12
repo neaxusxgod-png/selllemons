@@ -687,10 +687,11 @@ if homesick then
         print("[Hub] toggle AutoRebirth = " .. tostring_(val))
     end):addKeybind("5", "Toggle", true, function() end)
     pcall_(function()
-        UIRef.t.RebirthMult = left:addSlider("rebirthMult", "Rebirth x", 2, 100, 2, function(val)
-            local m = mfloor(tonumber_(val) or 2)
-            if m < 2 then m = 2 elseif m > 100 then m = 100 end
-            RB.mult = m
+
+        UIRef.t.RebirthMult = left:addSlider("rebirthPct", "Rebirth at +%", 1, 100, 25, function(val)
+            local m = mfloor(tonumber_(val) or 25)
+            if m < 1 then m = 1 elseif m > 100 then m = 100 end
+            RB.gainPct = m
         end)
     end)
 
@@ -2547,9 +2548,9 @@ local function pollInput()
             local remP = (RB.peekEvery or 60) - (tick_() - (RB.lastPeek or 0))
             if remP < 0 then remP = 0 end
             if RB.lastInfo then
-                txt5 = sformat("x%d  |  %s  |  %ds", RB.mult or 2, RB.lastInfo, mfloor(remP) + 1)
+                txt5 = sformat("+%d%%  |  %s  |  %ds", RB.gainPct or 25, RB.lastInfo, mfloor(remP) + 1)
             else
-                txt5 = sformat("x%d  |  %ds", RB.mult or 2, mfloor(remP) + 1)
+                txt5 = sformat("+%d%%  |  %ds", RB.gainPct or 25, mfloor(remP) + 1)
             end
         elseif RB.status == "cooldown" then
             local remC = 30 - (tick_() - (RB.lastReb or 0))
@@ -2963,7 +2964,7 @@ function RB.computeDecision()
     elseif curZero then
         go, pct = true, 100
     else
-        local th = _log10(math.max(1, (RB.mult or 2) - 1)) + curLog
+        local th = _log10((RB.gainPct or 25) / 100) + curLog
         go = gainLog >= th
         pct = math.min(999, 10 ^ (gainLog - th) * 100)
     end
@@ -2976,7 +2977,7 @@ function RB.computeDecision()
     RB.pct = pct
 
     RB.lastInfo = ((RB.spentEstT or pct < 2) and "" or "~") .. RB.fmtPct(pct)
-    RB.status = sformat("x%d  |  %s  |  %s", RB.mult or 2, RB.lastInfo,
+    RB.status = sformat("+%d%%  |  %s  |  %s", RB.gainPct or 25, RB.lastInfo,
         (pct >= 100) and "GO" or (fire and "verify" or "wait"))
 
     if (tick_() - (RB.diagT or 0)) >= 60 then
@@ -3122,7 +3123,7 @@ function RB.confirmRebirth(cf)
             buildButtonsCache()
         end)
         RB.status = "REBIRTHED!"
-        rprint("[Rebirth] confirmed (x" .. tostring_(RB.mult) .. ")")
+        rprint("[Rebirth] confirmed (+" .. tostring_(RB.gainPct or 25) .. "%)")
     else
         RB.status = "confirm stuck - dismissed"
         print("[Rebirth] confirm did not register, dismissing alert")
@@ -3146,7 +3147,7 @@ function RB.decide(curT, gainT)
         if RB.isZero(curT) then return true, 100 end
         return nil
     end
-    local th = _log10(math.max(1, (RB.mult or 2) - 1)) + curLog
+    local th = _log10((RB.gainPct or 25) / 100) + curLog
 
     return (gainLog >= th), math.min(999, 10 ^ (gainLog - th) * 100)
 end
@@ -3286,8 +3287,8 @@ function RB.runCheck(g)
     local cashLog = RB.cashLog()
     local cEff = (cashLog and RB.earnLog and RB.earnLog > cashLog) and RB.earnLog or cashLog
     local estGain = cEff and RB.calcGainLog(cEff, curLog) or nil
-    local mult = RB.mult or 2
-    local th = curZero and 0.01 or (_log10(math.max(1, mult - 1)) + (curLog or 0))
+    local pctTh = RB.gainPct or 25
+    local th = curZero and 0.01 or (_log10(pctTh / 100) + (curLog or 0))
 
     if not autoRebirthActive then RB.status = "off"; return end
     RB.status = "verifying via popup..."
@@ -3319,7 +3320,7 @@ function RB.runCheck(g)
 
             RB.calibrate(trueGain, curLog, cashLog)
             RB.go = false; RB.goN = 0
-            RB.status = sformat("x%d  |  %s  |  wait", mult, RB.lastInfo)
+            RB.status = sformat("+%d%%  |  %s  |  wait", pctTh, RB.lastInfo)
             print("[Rebirth] popup says " .. RB.lastInfo .. " (early) - calibrated, waiting")
             RB.dismissAlert(); RB.closePanel(g)
             RB.lastPeek = tick_()
