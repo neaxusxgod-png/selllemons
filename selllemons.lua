@@ -633,7 +633,7 @@ end
 
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
-    local window = homesick.createWindow("Sell Lemons", 480, 420)
+    local window = homesick.createWindow("Sell Lemons", 480, 480)
 
     UIRef.win = window
 
@@ -675,9 +675,28 @@ if homesick then
         print("[Hub] toggle CashFarm = " .. tostring_(val))
     end):addKeybind("4", "Toggle", true, function() end)
 
+    UIRef.t.AutoRebirth = left:addToggle("autoRebirth", "Auto Rebirth", false, function(val)
+        autoRebirthActive = val
+        if val then
+
+            RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
+        else
+            RB.go = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil
+            RB.goN = 0; RB.needCur = false
+        end
+        print("[Hub] toggle AutoRebirth = " .. tostring_(val))
+    end):addKeybind("5", "Toggle", true, function() end)
+    pcall_(function()
+        UIRef.t.RebirthMult = left:addSlider("rebirthMult", "Rebirth x", 2, 100, 2, function(val)
+            local m = mfloor(tonumber_(val) or 2)
+            if m < 2 then m = 2 elseif m > 100 then m = 100 end
+            RB.mult = m
+        end)
+    end)
+
     local right = tab1:addSection("Control", "Left")
 
-    pcall_(function() window:setBadge("Sell Lemons v19.6  |  by Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v20  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -698,24 +717,6 @@ if homesick then
         end
     end)
 
-    UIRef.t.AutoRebirth = right:addToggle("autoRebirth", "Auto Rebirth", false, function(val)
-        autoRebirthActive = val
-        if val then
-
-            RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
-        else
-            RB.go = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil
-        end
-        print("[Hub] toggle AutoRebirth = " .. tostring_(val))
-    end)
-    pcall_(function()
-        UIRef.t.RebirthMult = right:addSlider("rebirthMult", "Rebirth x", 2, 100, 2, function(val)
-            local m = mfloor(tonumber_(val) or 2)
-            if m < 2 then m = 2 elseif m > 100 then m = 100 end
-            RB.mult = m
-        end)
-    end)
-
     pcall_(function() right:addSeparator() end)
 
     UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
@@ -730,7 +731,7 @@ if homesick then
                 pcall_(function() UIRef.t.StopAll:SetValue(false) end)
             end)
         end
-    end):addKeybind("5", "Toggle", true, function()
+    end):addKeybind("6", "Toggle", true, function()
         stopAll()
         task.delay(0.1, function()
             pcall_(function() UIRef.t.StopAll:SetValue(false) end)
@@ -798,6 +799,8 @@ local buttonsFolderSet = {}
 local buttonsCacheReady = false
 local purchasesConnSet = {}
 
+local strayFolderPaths = {}
+
 local function addButtonsFolder(folder)
     if not folder or buttonsFolderSet[folder] then return end
     buttonsFolderSet[folder] = true
@@ -829,6 +832,33 @@ local function hookPurchaseCategory(cat)
     end)
 end
 
+local function discoverStrayPaths(purchases)
+    for _, d in ipairs_(purchases:GetDescendants()) do
+        if d.Name == "Button" and d:IsA("BasePart") then
+            local chain, cur = {}, d
+            for _ = 1, 12 do
+                local p = cur.Parent
+                if not p or tostring_(p.Name) == "Purchases" then break end
+                chain[#chain + 1] = p
+                cur = p
+            end
+            local hasButtons = false
+            for i = 1, #chain do
+                if tostring_(chain[i].Name) == "Buttons" then hasButtons = true break end
+            end
+            if not hasButtons and #chain >= 2 then
+                local sub = chain[#chain - 1]
+                if tostring_(sub.ClassName) == "Folder" then
+                    addButtonsFolder(sub)
+                    local cn = tostring_(chain[#chain].Name)
+                    strayFolderPaths[cn] = strayFolderPaths[cn] or {}
+                    strayFolderPaths[cn][tostring_(sub.Name)] = true
+                end
+            end
+        end
+    end
+end
+
 local function buildButtonsCache()
     buttonsFolders, buttonsFolderSet, purchasesConnSet = {}, {}, {}
     buttonsCacheReady = false
@@ -839,28 +869,7 @@ local function buildButtonsCache()
     for _, cat in ipairs_(purchases:GetChildren()) do
         hookPurchaseCategory(cat)
     end
-
-    pcall_(function()
-        for _, d in ipairs_(purchases:GetDescendants()) do
-            if d.Name == "Button" and d:IsA("BasePart") then
-                local chain, cur = {}, d
-                for _ = 1, 12 do
-                    local p = cur.Parent
-                    if not p or tostring_(p.Name) == "Purchases" then break end
-                    chain[#chain + 1] = p
-                    cur = p
-                end
-                local hasButtons = false
-                for i = 1, #chain do
-                    if tostring_(chain[i].Name) == "Buttons" then hasButtons = true break end
-                end
-                if not hasButtons and #chain >= 2 then
-                    local sub = chain[#chain - 1]
-                    if tostring_(sub.ClassName) == "Folder" then addButtonsFolder(sub) end
-                end
-            end
-        end
-    end)
+    pcall_(function() discoverStrayPaths(purchases) end)
     pcall_(function()
         purchases.ChildAdded:Connect(function(newCat)
             hookPurchaseCategory(newCat)
@@ -1118,22 +1127,26 @@ local function appendNewButtons()
     local hrpPos = hrp and hrp.Position or nil
     local added = 0
 
+    local newItems = {}
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
             local fails = failedButtons[key] or 0
             if not existingKeys[key] and buyReady(key, v) and not isGreyedOut(v) and not isBlacklisted(key, v) then
                 local dist = hrpPos and (v.Position - hrpPos).Magnitude or 999999
-                tinsert(lq, {
+                newItems[#newItems + 1] = {
                     btn   = v,
                     key   = key,
                     dist  = dist,
                     fails = fails
-                })
+                }
                 added = added + 1
             end
         end
     end
+
+    table.sort(newItems, function(a, b) return a.dist < b.dist end)
+    for i = 1, #newItems do tinsert(lq, newItems[i]) end
 
     queueLock = false
     return added
@@ -1487,6 +1500,35 @@ _wrap("autobuy-coord", function()
             continue
         end
 
+        if (tick_() - (_bScan.foldT or 0)) > 8 then
+            _bScan.foldT = tick_()
+            _bScan.foldN = (_bScan.foldN or 0) + 1
+            pcall_(function()
+                local pur = myTycoon and myTycoon:FindFirstChild("Purchases")
+                if not pur then return end
+
+                if _bScan.foldN % 3 == 0 then pcall_(function() discoverStrayPaths(pur) end) end
+                local fresh = {}
+                for _, cat in ipairs_(pur:GetChildren()) do
+                    local bf = cat:FindFirstChild("Buttons")
+                    if bf then fresh[#fresh + 1] = bf end
+                    local subs = strayFolderPaths[tostring_(cat.Name)]
+                    if subs then
+                        for sn in pairs_(subs) do
+                            local sf = cat:FindFirstChild(sn)
+                            if sf then fresh[#fresh + 1] = sf end
+                        end
+                    end
+                end
+                if #fresh > 0 then
+                    local set = {}
+                    for i = 1, #fresh do set[fresh[i]] = true end
+                    buttonsFolders, buttonsFolderSet = fresh, set
+                    _bScan.t = 0
+                end
+            end)
+        end
+
         if not myTycoon or not myTycoon.Parent then
             myTycoon = findMyTycoon()
             if myTycoon then
@@ -1530,6 +1572,45 @@ _wrap("autobuy-coord", function()
         end
 
         task_wait(0.3)
+    end
+end)
+
+_wrap("buy-spy", function()
+    while ScriptActive do
+        task_wait(5)
+        if autoBuyActive then
+            pcall_(function()
+                local chr = player.Character
+                local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+                if not hrp then return end
+                local hp = hrp.Position
+                local best, bd
+                for _, v in ipairs_(getButtonsRealTime()) do
+                    if v and v.Parent then
+                        local d = (v.Position - hp).Magnitude
+                        if d < 35 and (not bd or d < bd) then bd = d; best = v end
+                    end
+                end
+                if not best then rprint("[BuySpy] рядом (<35) кнопок в СКАНЕ нет | папок=" .. #buttonsFolders .. " очередь=" .. (#localQueue - queueIndex + 1)); return end
+                local key = getButtonKey(best) or "?"
+                local a = buyAttempt[key]
+                local inQ = false
+                for i = queueIndex, #localQueue do
+                    local it = localQueue[i]
+                    if it and it.key == key then inQ = true; break end
+                end
+                local nm = "?"; pcall_(function() nm = best.Parent.Name end)
+                rprint(sformat("[BuySpy] %s d=%d | n=%s next_in=%s | grey=%s black=%s inQueue=%s ready=%s | очередь=%d",
+                    tostring_(nm), mfloor(bd or 0),
+                    tostring_(a and a.n or 0),
+                    a and sformat("%.1f", a.next - tick_()) or "-",
+                    tostring_(isGreyedOut(best)),
+                    tostring_(isBlacklisted(key, best)),
+                    tostring_(inQ),
+                    tostring_(buyReady(key, best)),
+                    #localQueue - queueIndex + 1))
+            end)
+        end
     end
 end)
 
@@ -1691,6 +1772,19 @@ function LSM.zoom(dir)
     end
 end
 
+local function _camFirstPerson(hrp)
+    if not hrp then return false end
+    local ok, d = pcall_(function()
+        if camera and camera.Position then
+            return (camera.Position - hrp.Position).Magnitude
+        end
+        return nil
+    end)
+    if not ok or type(d) ~= "number" then return nil end
+    return d < (LSM.FP_DIST or 6)
+end
+LSM.FP_DIST = 6
+
 function LSM.tiltDown()
     if not _windowFocused() then return false end
     if type(mouse2press) ~= "function" or type(mouse2release) ~= "function"
@@ -1751,6 +1845,8 @@ local function processLemon(v, hrp)
 
     if not LSM.zoomedIn then return false end
 
+    if _camFirstPerson(hrp) == false then LSM.zoomedIn = false; return false end
+
     local origSize, origTransp, origCanColl = nil, nil, nil
     local hitboxApplied = false
     if LEMON_HITBOX_ENABLED then
@@ -1787,10 +1883,13 @@ local function processLemon(v, hrp)
                 break
             end
             LSM.lastBot = tick_()
-            if on and sp then
+
+            if on and sp and sp.X == sp.X and mabs(sp.X) < vps.X * 4 and mabs(sp.Y) < vps.Y * 4 then
                 mousemoverel(mfloor((sp.X - cx) * 0.5), mfloor((sp.Y - cy) * 0.5))
-            else
+            elseif on then
                 mousemoverel(0, -260)
+            else
+                break
             end
             task_wait(0.012)
         end
@@ -1870,7 +1969,7 @@ local function processSnapshot(snapshot, hrp)
             if not LSM.zoomedIn then break end
             if not _windowFocused() then break end
 
-            if (tick_() - (LSM.zoomInT or 0)) >= 3 and type(mousescroll) == "function" then
+            if (tick_() - (LSM.zoomInT or 0)) >= 3 and type(mousescroll) == "function" and _camFirstPerson(hrp) ~= false then
                 LSM.zoomInT = tick_()
                 LSM.lastBot = tick_()
                 pcall_(function() for _ = 1, 8 do mousescroll(CFG.zoomStep); task_wait(0.01) end end)
@@ -1946,7 +2045,9 @@ _wrap("lemon-farm", function()
             LSM.annAfk = false
             LSM.returnHome()
         end
-        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy()
+
+        local rbBusy = (tick_() - (RB.busyT or 0)) < 4 and (tick_() - (RB.checkStartT or 0)) < 30
+        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or rbBusy or MG.lemBusy()
 
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
 
@@ -1958,12 +2059,24 @@ _wrap("lemon-farm", function()
 
                 pcall_(function()
                     local vp = camera.ViewportSize
-                    if vp then mousemoveabs(mfloor(vp.X / 2), mfloor(vp.Y / 2)) end
+                    if vp then mousemoveabs(mfloor(vp.X / 2), mfloor(vp.Y * 0.12)) end
                 end)
                 LSM.zoom(1)
+
+                local chrA = player.Character
+                local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
+                if _camFirstPerson(hA) == false then
+                    pcall_(function()
+                        local vp = camera.ViewportSize
+                        if vp then mousemoveabs(mfloor(vp.X / 2), mfloor(vp.Y * 0.08)) end
+                    end)
+                    if type(mousescroll) == "function" and _windowFocused() then
+                        pcall_(function() for _ = 1, CFG.zoomTicks do mousescroll(CFG.zoomStep); task_wait(0.02) end end)
+                    end
+                    local fp = _camFirstPerson(hA)
+                    if fp ~= nil then LSM.zoomedIn = fp end
+                end
                 pcall_(function()
-                    local chrA = player.Character
-                    local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
                     if hA then
                         camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
                     end
@@ -2060,11 +2173,50 @@ _wrap("cash-farm", function()
     end
 end)
 
-local statusTx = D("Text", {Text = "", FontSize = 14, Size = 14, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 226, 58)})
-local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
-local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
-local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
-local statusTx5 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 226, 58)})
+local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx5 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local stUI = { lbl = {}, dot = {} }
+stUI.panel = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 10, Rounding = 10, Color = C3rgb(14, 14, 10), Transparency = 0.62, Visible = false, ZIndex = 2})
+stUI.ln = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = false, Thickness = 1, Corner = 10, Rounding = 10, Color = C3rgb(255, 226, 58), Transparency = 0.18, Visible = false, ZIndex = 3})
+stUI.title = D("Text", {Text = "SELL LEMONS", FontSize = 10, Size = 10, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 226, 58), Transparency = 0.7})
+for i = 1, 5 do
+    stUI.lbl[i] = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(168, 158, 128)})
+    stUI.dot[i] = D("Circle", {Radius = 3, NumSides = 12, Filled = true, Position = Vec2(0, 0), Color = C3rgb(255, 200, 40), Transparency = 1, Visible = false, ZIndex = 4})
+end
+
+function S.stLine(valObj, i, fullTxt)
+    local lbl, val = tostring_(fullTxt):match("^(.-)%s+|%s+(.+)$")
+    if not lbl then lbl, val = "", tostring_(fullTxt) end
+    local y = S.stY
+    local L, dt = stUI.lbl[i], stUI.dot[i]
+    L.Text = lbl; L.Position = Vec2(S.stX + 28, y); L.Visible = true
+    valObj.Text = val; valObj.Position = Vec2(S.stX + 122, y); valObj.Visible = true
+    local up = val:upper()
+    if up:find("READY") or up:find("FARMING") or up:find("GO", 1, true) then
+        dt.Color = C3rgb(120, 245, 110)
+        dt.Transparency = 0.55 + 0.4 * math.sin(tick_() * 5)
+    elseif up:find("PAUSED") or up:find("WAIT") or up:find("IDLE") or up:find("STARTS IN")
+        or up:match("^%d+:%d") or up == "--" or up:find("SOON") then
+        dt.Color = C3rgb(150, 140, 110); dt.Transparency = 0.8
+    else
+        dt.Color = C3rgb(255, 200, 40); dt.Transparency = 0.95
+    end
+    dt.Position = Vec2(S.stX + 16, y + 7); dt.Visible = true
+    S.stY = y + 19
+end
+function S.stHide(valObj, i)
+    valObj.Visible = false; stUI.lbl[i].Visible = false; stUI.dot[i].Visible = false
+end
+
+local rbBarBg = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(24, 24, 20), Transparency = 0.72, Visible = false, ZIndex = 4})
+local rbBarLn = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = false, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(255, 226, 58), Transparency = 0.3, Visible = false, ZIndex = 6})
+local rbBarSegs = {}
+for _ = 1, 12 do
+    rbBarSegs[#rbBarSegs + 1] = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 2, Rounding = 2, Color = C3rgb(255, 226, 58), Transparency = 1, Visible = false, ZIndex = 5})
+end
 
 function LSM.findVine()
     local c = LSM.vineRef
@@ -2195,49 +2347,91 @@ local function pollInput()
         end)
     end
 
+    if (nowA - (S.barT or 0)) >= 0.05 then
+        S.barT = nowA
+        pcall_(function()
+            local gm = S.barGeom
+            if not gm then
+                rbBarBg.Visible = false; rbBarLn.Visible = false
+                for i = 1, 12 do rbBarSegs[i].Visible = false end
+                return
+            end
+            if (tick_() - (RB.checkStartT or 0)) < 30 then return end
+            local pct = gm.pct or 0
+            if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
+            local barW, barH = 200, 8
+            rbBarBg.Position = Vec2(gm.bx, gm.by); rbBarBg.Size = Vec2(barW, barH); rbBarBg.Visible = true
+            rbBarLn.Position = Vec2(gm.bx, gm.by); rbBarLn.Size = Vec2(barW, barH); rbBarLn.Visible = true
+            local t = tick_()
+            local br, bgr, bb = RB.pctRGB(pct)
+            rbBarLn.Color = C3rgb(br, bgr, bb)
+            rbBarLn.Transparency = 0.26 + 0.14 * math.sin(t * ((pct >= 100) and 6 or 2.2))
+            local fw = mfloor((barW - 4) * pct / 100)
+            local segW = (barW - 4) / 12
+            for i = 1, 12 do
+                local s = rbBarSegs[i]
+                local x0 = mfloor((i - 1) * segW)
+                local x1 = mfloor(i * segW) - 1
+                if x1 > fw then x1 = fw end
+                local w = x1 - x0
+                if w > 1 then
+                    local k = 1 + ((pct >= 100) and 0.45 or 0.30) * math.sin(t * 2.6 - i * 0.85)
+                    local r, g, b = br, bgr, bb
+                    if k <= 1 then
+                        r, g, b = r * k, g * k, b * k
+                    else
+                        local u = k - 1
+                        r = r + (255 - r) * u; g = g + (255 - g) * u; b = b + (255 - b) * u
+                    end
+                    s.Position = Vec2(gm.bx + 2 + x0, gm.by + 2); s.Size = Vec2(w, barH - 4)
+                    s.Color = C3rgb(mfloor(r), mfloor(g), mfloor(b)); s.Visible = true
+                else
+                    s.Visible = false
+                end
+            end
+        end)
+    end
     if (nowA - (S.statusT or 0)) < (CFG.slow and 0.4 or 0.15) then return end
     S.statusT = nowA
 
-    local vx = 960
-    pcall_(function() vx = camera.ViewportSize.X * 0.5 end)
-    local sy = 8
+    local vx = 1920
+    pcall_(function() vx = camera.ViewportSize.X end)
+    local vy0 = 58
+    S.stX = vx - 314
+    S.stY = vy0 + 16
     if lemonFarmActive then
         local txt
         local qRem = #localQueue - queueIndex + 1
         if autoBuyActive and qRem > 0 then
-            txt = "lemon farm  |  paused: auto buy working"
+            txt = "lemon farm  |  paused: buy"
         elseif autoStandActive and (nowA - (LSM.standBusyT or 0)) < 4 then
-            txt = "lemon farm  |  paused: auto stand working"
+            txt = "lemon farm  |  paused: stand"
         elseif (nowA - (RB.busyT or 0)) < 4 then
-            txt = "lemon farm  |  paused: rebirth working"
+            txt = "lemon farm  |  paused: rebirth"
         else
             local idleT = nowA - (S.lastUser or 0)
             if idleT < CFG.afkDelay then
-                txt = sformat("lemon farm  |  starts in %ds (stop moving)", mfloor(CFG.afkDelay - idleT) + 1)
+                txt = sformat("lemon farm  |  starts in %ds", mfloor(CFG.afkDelay - idleT) + 1)
             else
-                txt = "lemon farm  |  FARMING (WASD = stop)"
+                txt = "lemon farm  |  FARMING (WASD stops)"
             end
         end
-        statusTx.Text = txt
-        statusTx.Position = Vec2(vx, sy); sy = sy + 20
-        statusTx.Visible = true
+        S.stLine(statusTx, 1, txt)
     else
-        statusTx.Visible = false
+        S.stHide(statusTx, 1)
     end
     if autoStandActive then
         local txt2
         if (nowA - (LSM.standBusyT or 0)) < 4 then
             txt2 = "auto stand  |  upgrading..."
         elseif LSM.standNextT and LSM.standNextT > nowA then
-            txt2 = sformat("auto stand  |  next pass in %ds", mfloor(LSM.standNextT - nowA) + 1)
+            txt2 = sformat("auto stand  |  pass in %ds", mfloor(LSM.standNextT - nowA) + 1)
         else
             txt2 = "auto stand  |  ON"
         end
-        statusTx2.Text = txt2
-        statusTx2.Position = Vec2(vx, sy); sy = sy + 20
-        statusTx2.Visible = true
+        S.stLine(statusTx2, 2, txt2)
     else
-        statusTx2.Visible = false
+        S.stHide(statusTx2, 2)
     end
 
     local vReady, vTimer
@@ -2292,34 +2486,32 @@ local function pollInput()
     end
 
     if vReady == true then
-        statusTx3.Text = "cash vine  |  READY"
         statusTx3.Color = C3rgb(255, 226, 58)
         if not CFG.vineNotif then
             CFG.vineNotif = true
             pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
         end
-        statusTx3.Position = Vec2(vx, sy); sy = sy + 20
-        statusTx3.Visible = true
+        S.stLine(statusTx3, 3, "cash vine  |  READY")
     elseif CFG.vineT then
         local rem = CFG.vineCd - (tick_() - CFG.vineT)
+        local t3
         if rem > 0 then
-            statusTx3.Text = sformat("cash vine  |  %d:%02d:%02d", mfloor(rem / 3600), mfloor((rem % 3600) / 60), mfloor(rem % 60))
+            t3 = sformat("cash vine  |  %d:%02d:%02d", mfloor(rem / 3600), mfloor((rem % 3600) / 60), mfloor(rem % 60))
             statusTx3.Color = C3rgb(222, 210, 170)
         elseif vReady == false then
-            statusTx3.Text = "cash vine  |  soon..."
+            t3 = "cash vine  |  soon..."
             statusTx3.Color = C3rgb(222, 210, 170)
         else
-            statusTx3.Text = "cash vine  |  READY"
+            t3 = "cash vine  |  READY"
             statusTx3.Color = C3rgb(255, 226, 58)
             if not CFG.vineNotif then
                 CFG.vineNotif = true
                 pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
             end
         end
-        statusTx3.Position = Vec2(vx, sy); sy = sy + 20
-        statusTx3.Visible = true
+        S.stLine(statusTx3, 3, t3)
     else
-        statusTx3.Visible = false
+        S.stHide(statusTx3, 3)
     end
 
     local mgName = MG.name()
@@ -2327,25 +2519,25 @@ local function pollInput()
         local cd = MG.timerSec()
         if cd and cd > 0 then MG.miniEnd = tick_() + cd; MG.saveMiniEnd() end
         local rem = MG.miniEnd and (MG.miniEnd - tick_()) or nil
+        local t4
         if rem and rem > 0 then
-            statusTx4.Text = sformat("%s  |  %d:%02d", mgName, mfloor(rem / 60), mfloor(rem % 60))
+            t4 = sformat("%s  |  %d:%02d", mgName, mfloor(rem / 60), mfloor(rem % 60))
             statusTx4.Color = C3rgb(222, 210, 170)
             MG.miniNotif = false
         elseif not MG.miniEnd then
-            statusTx4.Text = mgName .. "  |  --"
+            t4 = mgName .. "  |  --"
             statusTx4.Color = C3rgb(222, 210, 170)
         else
-            statusTx4.Text = mgName .. "  |  READY"
+            t4 = mgName .. "  |  READY"
             statusTx4.Color = C3rgb(255, 226, 58)
             if MG.active and not MG.miniNotif then
                 MG.miniNotif = true
                 pcall_(function() notify(mgName .. " is READY", "Sell Lemons", 4) end)
             end
         end
-        statusTx4.Position = Vec2(vx, sy); sy = sy + 20
-        statusTx4.Visible = true
+        S.stLine(statusTx4, 4, t4)
     else
-        statusTx4.Visible = false
+        S.stHide(statusTx4, 4)
     end
 
     if autoRebirthActive then
@@ -2366,7 +2558,6 @@ local function pollInput()
         else
             txt5 = tostring_(RB.status or "...")
         end
-        statusTx5.Text = "rebirth  |  " .. txt5
 
         if RB.go then
             statusTx5.Color = RB.pctColor(100)
@@ -2375,10 +2566,23 @@ local function pollInput()
         else
             statusTx5.Color = C3rgb(222, 210, 170)
         end
-        statusTx5.Position = Vec2(vx, sy); sy = sy + 20
-        statusTx5.Visible = true
+        S.stLine(statusTx5, 5, "rebirth  |  " .. txt5)
+
+        S.barGeom = { bx = S.stX + 50, by = S.stY + 1, pct = (RB.go and 100 or (RB.pct or 0)) }
+        S.stY = S.stY + 16
     else
-        statusTx5.Visible = false
+        S.stHide(statusTx5, 5)
+        S.barGeom = nil
+    end
+
+    if S.stY > vy0 + 16 then
+        stUI.title.Position = Vec2(S.stX + 150, vy0 - 1); stUI.title.Visible = true
+        stUI.panel.Position = Vec2(S.stX, vy0 - 8); stUI.panel.Size = Vec2(300, S.stY - vy0 + 12)
+        stUI.panel.Visible = true
+        stUI.ln.Position = Vec2(S.stX, vy0 - 8); stUI.ln.Size = Vec2(300, S.stY - vy0 + 12)
+        stUI.ln.Visible = true
+    else
+        stUI.title.Visible = false; stUI.panel.Visible = false; stUI.ln.Visible = false
     end
 end
 
@@ -2507,6 +2711,13 @@ local function _logAdd(a, b)
     local hi, lo = (a > b) and a or b, (a > b) and b or a
     return hi + _log10(1 + 10 ^ (lo - hi))
 end
+
+local function _logSub(a, b)
+    if not a or not b or b >= a - 1e-9 then return nil end
+    local d = 1 - 10 ^ (b - a)
+    if d <= 0 then return nil end
+    return a + _log10(d)
+end
 local HUGE_EXP = {}
 do
     local BASE = {[0]="thousand","million","billion","trillion","quadrillion","quintillion","sextillion","septillion","octillion","nonillion","decillion","undecillion","duodecillion","tredecillion","quattuordecillion","quindecillion","sexdecillion","septendecillion","octodecillion","novemdecillion"}
@@ -2571,6 +2782,22 @@ end
 
 function RB.gui()
     local pg = getPlayerGui(); if not pg then return nil end
+    local best
+    pcall_(function()
+        for _, c in ipairs_(pg:GetChildren()) do
+            if tostring_(c.Name) == "Rebirth" then
+                local alive = false
+                pcall_(function()
+                    local m = c:FindFirstChild("InvestorsMenu")
+                    local ap = m and m.AbsolutePosition
+                    if ap and type(ap.X) == "number" then alive = true end
+                end)
+
+                if alive and not best then best = c end
+            end
+        end
+    end)
+    if best then return best end
     local g; pcall_(function() g = pg:FindFirstChild("Rebirth") end)
     return g
 end
@@ -2578,6 +2805,46 @@ function RB.text(node)
     if not node then return "" end
     local t; pcall_(function() t = node.Text end)
     return tostring_(t or "")
+end
+
+function RB.curFromAttr()
+    local v
+    pcall_(function()
+        local t = myTycoon
+        if not t or not t.Parent then t = findMyTycoon(); myTycoon = t or myTycoon end
+        local vals = t and t:FindFirstChild("Values")
+        local inner = vals and vals:FindFirstChild("Values")
+        if inner then v = inner:GetAttribute("Investors") end
+    end)
+    if not RB.attrRawShown then
+        RB.attrRawShown = true
+        rprint("[Rebirth] attr Investors raw=" .. tostring_(v):sub(1, 24) .. " type=" .. type(v))
+    end
+    local L, Z
+    if type(v) == "number" then
+        if v <= 0 then Z = true else L = _log10(v) end
+    elseif type(v) == "string" then
+
+        local s = v:gsub("^%s+", ""):gsub("%s+$", "")
+        if s:match("^[%d%.,]+$") then
+            local n = tonumber_((s:gsub(",", "")))
+            if n and n > 0 then L = _log10(n) elseif n == 0 then Z = true end
+        elseif s:match("^[%d%.]+[eE][%+%-]?%d+$") then
+            local n = tonumber_(s)
+            if n and n > 0 then L = _log10(n) end
+        else
+            local mant, suf = s:match("^([%d][%d%.,]*)%s+(%a+)$")
+            if mant and suf and HUGE_EXP[suf:lower()] then L = parseHugeLog(s) end
+        end
+    end
+
+    if L and RB.curLog and L < RB.curLog - 6 then
+        rprint("[Rebirth] attr looks bogus (way below cache) -> fallback")
+        return nil, nil
+    end
+    if L then return L, false end
+    if Z then return nil, true end
+    return nil, nil
 end
 
 function RB.numText(node)
@@ -2590,6 +2857,135 @@ function RB.numText(node)
         if t ~= "" and best == "" then best = t end
     end
     return best
+end
+
+function RB.strictLog(t)
+    local s = tostring_(t or ""):gsub("<[^>]*>", " "):gsub("^[%s%+%$]+", ""):gsub("%s+$", "")
+    if s == "" then return nil end
+    if s:match("^[%d%.,]+$") then
+        local n = tonumber_((s:gsub(",", "")))
+        if n and n > 0 then return _log10(n) end
+        return nil
+    end
+    local mant, suf = s:match("^([%d][%d%.,]*)%s+(%a+)$")
+    if mant and suf and HUGE_EXP[suf:lower()] then
+        local n = tonumber_((mant:gsub(",", "")))
+        if n and n > 0 then return _log10(n) + HUGE_EXP[suf:lower()] end
+    end
+    return nil
+end
+
+function RB.curFromLabel()
+    local n = RB.node(RB.gui(), "InvestorsMenu/Body/Amount/Quantity")
+    if not n then return nil, false end
+    local t = RB.numText(n)
+    local L = RB.strictLog(t)
+    if not L then return nil, RB.isZero(t) end
+    if RB.curLog and L < RB.curLog - 6 then return nil, false end
+    return L, false
+end
+
+RB.U2LOG = 17.255272505103306
+RB.U3 = 0.44
+function RB.calcGainLog(cLog, pLog)
+    if not cLog then return nil end
+    if not pLog then return RB.U3 * (cLog - RB.U2LOG) end
+    local v8Log = cLog - RB.U2LOG - pLog / RB.U3
+    if v8Log < -8 then
+        return pLog + _log10(RB.U3) + v8Log
+    elseif v8Log > 30 then
+        return pLog + RB.U3 * v8Log
+    end
+    local v8 = 10 ^ v8Log
+    local m = (1 + v8) ^ RB.U3 - 1
+    if m <= 0 then return nil end
+    return pLog + _log10(m)
+end
+
+function RB.calibrate(gainLog, pLog, cashLog)
+    if not (gainLog and cashLog) then return end
+    local cT
+    if not pLog then
+        cT = gainLog / RB.U3 + RB.U2LOG
+    else
+        local m = 10 ^ (gainLog - pLog)
+        if m <= 0 then return end
+        local v8 = (1 + m) ^ (1 / RB.U3) - 1
+        if v8 <= 0 then return end
+        cT = _log10(v8) + RB.U2LOG + pLog / RB.U3
+    end
+
+    if (not RB.earnLog) or cT > RB.earnLog then RB.earnLog = cT end
+    RB.lastCashLog = cashLog
+    RB.spentEstT = tick_()
+    rprint("[Rebirth] calibrated: total earned ~" .. fmtAbbr(cT))
+end
+
+function RB.computeDecision()
+    RB.needCur = false
+    local cashLog = RB.cashLog()
+    if not cashLog then
+        RB.goN = 0
+        RB.compFailN = (RB.compFailN or 0) + 1
+        if RB.compFailN >= 4 then RB.go = false; RB.status = "cash unreadable" end
+        return
+    end
+    RB.compFailN = 0
+
+    local curLog, curZero, curSrc
+    local lLog, lZero = RB.curFromLabel()
+    if lLog then curLog, curSrc = lLog, "label"
+    elseif lZero then curZero, curSrc = true, "label0"
+    else
+        local aLog = RB.curFromAttr()
+        if aLog then curLog, curSrc = aLog, "attr"
+        elseif RB.curLog then curLog, curSrc = RB.curLog, "cache" end
+    end
+    if curLog then RB.curLog = curLog end
+    if not curLog and not curZero then
+        RB.go = false; RB.goN = 0; RB.needCur = true
+        RB.status = "reading investors..."
+        return
+    end
+
+    if not RB.earnLog then
+        RB.earnLog = cashLog
+    elseif RB.lastCashLog and cashLog > RB.lastCashLog + 1e-12 then
+        local d = _logSub(cashLog, RB.lastCashLog)
+        if d then RB.earnLog = _logAdd(RB.earnLog, d) end
+    end
+    RB.lastCashLog = cashLog
+    local cEff = (RB.earnLog and RB.earnLog > cashLog) and RB.earnLog or cashLog
+    local gainLog = RB.calcGainLog(cEff, curLog)
+    local go, pct
+    if not (gainLog and gainLog > 0.01) then
+        go, pct = false, 0
+    elseif curZero then
+        go, pct = true, 100
+    else
+        local th = _log10(math.max(1, (RB.mult or 2) - 1)) + curLog
+        go = gainLog >= th
+        pct = math.min(999, 10 ^ (gainLog - th) * 100)
+    end
+
+    local stale = (not RB.spentEstT) or ((tick_() - RB.spentEstT) > 900)
+    local probe = stale and pct >= 2 and (tick_() - (RB.probeTryT or 0)) > 300
+    local fire = go or (pct >= 100) or probe
+    RB.go = fire
+    RB.goN = fire and ((RB.goN or 0) + 1) or 0
+    RB.pct = pct
+    RB.lastInfo = (RB.spentEstT and "" or "~") .. RB.fmtPct(pct)
+    RB.status = sformat("x%d  |  %s  |  %s", RB.mult or 2, RB.lastInfo,
+        (pct >= 100) and "GO" or (fire and "verify" or "wait"))
+
+    if (tick_() - (RB.diagT or 0)) >= 60 then
+        RB.diagT = tick_()
+        local offT = RB.numText(RB.node(RB.gui(), "Sidebar/Container/Investors/Offset"))
+        rprint("[RB peek] est=" .. RB.fmtPct(pct) .. "  gain~" .. (gainLog and fmtAbbr(gainLog) or "?")
+            .. "  cur=" .. (curLog and fmtAbbr(curLog) or (curZero and "0" or "?")) .. "(" .. tostring_(curSrc or "?") .. ")"
+            .. "  cash=" .. fmtAbbr(cashLog) .. "  earned~" .. (RB.earnLog and fmtAbbr(RB.earnLog) or "?")
+            .. "  offset='" .. tostring_(offT):sub(1, 24) .. "'")
+    end
 end
 
 function RB.shortStr(s)
@@ -2634,7 +3030,8 @@ end
 
 function RB.prepClick()
     RB.busyT = tick_()
-    if lemonFarmActive and LSM.zoomedIn then
+
+    if lemonFarmActive then
         pcall_(function() LSM.zoom(-1) end)
         RB.busyT = tick_()
     end
@@ -2658,6 +3055,7 @@ function RB.click(node)
 end
 
 function RB.panelOpen(g)
+    g = RB.gui() or g
     local ap, vp
     pcall_(function()
         local b = RB.node(g, "InvestorsMenu/Body/Rebirth")
@@ -2665,12 +3063,18 @@ function RB.panelOpen(g)
         vp = camera.ViewportSize
     end)
     if not ap or not vp then return false end
-    return ap.X > 1 and ap.X < vp.X * 0.85
+    return ap.X > 1 and ap.X < vp.X * 0.92
 end
 
 function RB.gainFromMsg(msg)
     local m = tostring_(msg):gsub("<[^>]*>", " ")
-    local seg = m:match("[Ff]or%s+([%d][%d%.,]*%s*%a+)") or m
+
+    local seg = m:match("[Ff]or%s+([%d][%d%.,]*%s*%a+)")
+            or m:match("[Gg]ain%s+([%d][%d%.,]*%s*%a+)")
+            or m:match("[Rr]eceive%s+([%d][%d%.,]*%s*%a+)")
+            or m:match("%+%s*([%d][%d%.,]*%s*%a+)%s*[Ii]nvestor")
+            or m:match("([%d][%d%.,]*%s*%a+)%s*[Nn]ew%s*[Ii]nvestor")
+    if not seg then return nil end
     return parseHugeLog(seg)
 end
 
@@ -2700,8 +3104,15 @@ function RB.confirmRebirth(cf)
     end
     if done then
         RB.lastReb = tick_(); RB.lastPeek = tick_(); RB.goSince = 0; RB.go = false
+        RB.goN = 0; RB.sideLog = nil
+        RB.earnLog = nil; RB.lastCashLog = nil; RB.spentEstT = tick_()
 
         if RB.curLog and RB.pendGain then RB.curLog = _logAdd(RB.curLog, RB.pendGain) end
+
+        if not RB.findConfirm() then
+            RB.busyT = 0; RB.checkStartT = 0
+            LSM.zoomedIn = false; LSM.zoomInT = 0
+        end
 
         pcall_(function()
             resetBuyBlacklist()
@@ -2721,7 +3132,7 @@ end
 
 function RB.isZero(s)
     s = tostring_(s or ""):gsub("<[^>]*>", "")
-    return s:match("^[%s%$]*0[%.,]?0*%s*$") ~= nil
+    return s:match("^[%s%$%+]*0[%.,]?0*%s*$") ~= nil
 end
 function RB.decide(curT, gainT)
     local curLog, gainLog = parseHugeLog(curT), parseHugeLog(gainT)
@@ -2746,21 +3157,25 @@ function RB.fmtPct(p)
     return sformat("%.1f%%", p)
 end
 
-function RB.pctColor(p)
+function RB.pctRGB(p)
     p = p or 0
     if p < 0 then p = 0 elseif p > 100 then p = 100 end
     local r, g, b
     if p < 50 then
         local u = p / 50
-        r, g, b = 255, mfloor(45 + u * 170), 45
+        r, g, b = 255, mfloor(120 + u * 80), mfloor(30 + u * 10)
     else
         local u = (p - 50) / 50
-        r, g, b = mfloor(255 - u * 210), mfloor(215 + u * 20), mfloor(45 + u * 50)
+        r, g, b = mfloor(255 - u * 165), mfloor(200 + u * 35), mfloor(40 + u * 40)
     end
-    return C3rgb(r, g, b)
+    return r, g, b
+end
+function RB.pctColor(p)
+    return C3rgb(RB.pctRGB(p))
 end
 
 function RB.closePanel(g)
+    g = RB.gui() or g
 
     for _ = 1, 6 do
         if not RB.panelOpen(g) then return end
@@ -2779,6 +3194,20 @@ end
 
 function RB.runCheck(g)
     RB.status = "checking..."
+    RB.wantSlot = false
+    RB.checkStartT = tick_()
+    RB.busyT = tick_()
+
+    if lemonFarmActive and LSM.zoomedIn then
+        for _ = 1, 4 do task_wait(0.4); RB.busyT = tick_() end
+    end
+
+    if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then
+        RB.status = "waiting: auto stand"
+        RB.busyT = 0
+        RB.lastPeek = tick_() - (RB.peekEvery or 60) + 5
+        return
+    end
     RB.prepClick()
     local sb = RB.node(g, "Sidebar/Container/Investors")
     if not sb then RB.status = "Investors button not found"; rprint("[Rebirth] sidebar Investors missing"); return end
@@ -2787,12 +3216,19 @@ function RB.runCheck(g)
         local ok = false
         for _ = 1, 2 do
             if not autoRebirthActive then return end
-            RB.click(sb)
+            RB.click(RB.node(RB.gui() or g, "Sidebar/Container/Investors") or sb)
             for _ = 1, 6 do
                 task_wait(0.4); RB.busyT = tick_()
                 if RB.panelOpen(g) then ok = true; break end
             end
             if ok then break end
+        end
+        if not ok then
+
+            for _ = 1, 5 do
+                task_wait(0.3); RB.busyT = tick_()
+                if RB.panelOpen(g) then ok = true; break end
+            end
         end
         if not ok then
             RB.go = false; RB.status = "couldn't open panel"
@@ -2801,72 +3237,105 @@ function RB.runCheck(g)
         end
     end
 
+    local curLog, curZero = nil, false
+    do
     local curT
-    for _ = 1, 14 do
-        curT = RB.numText(RB.node(g, "InvestorsMenu/Body/Amount/Quantity"))
-        if parseHugeLog(curT) or RB.isZero(curT) then break end
+
+    local zeroHits, valHits = 0, 0
+
+    local curTries = RB.curLog and 4 or 8
+    for _ = 1, curTries do
+        curT = RB.numText(RB.node(RB.gui() or g, "InvestorsMenu/Body/Amount/Quantity"))
+        if RB.strictLog(curT) then
+            valHits = valHits + 1
+            if valHits >= 2 then break end
+        elseif RB.isZero(curT) then
+            zeroHits = zeroHits + 1
+        else
+            zeroHits = 0; valHits = 0
+        end
         task_wait(0.4); RB.busyT = tick_()
     end
-    local curLog, curZero = nil, false
-    if RB.isZero(curT) then
+    if RB.isZero(curT) and zeroHits >= 3 and valHits == 0 then
         curZero = true; RB.curLog = nil
-    elseif parseHugeLog(curT) then
-        curLog = parseHugeLog(curT); RB.curLog = curLog
+    elseif RB.strictLog(curT) then
+        curLog = RB.strictLog(curT); RB.curLog = curLog
     elseif RB.curLog then
         curLog = RB.curLog
         rprint("[Rebirth] cur garbled -> using cached")
     else
+
+        local aLog = RB.curFromAttr()
+        if aLog then
+            curLog = aLog; RB.curLog = aLog
+            rprint("[Rebirth] investors source = attribute (" .. fmtAbbr(aLog) .. ")")
+        else
         RB.go = false
         local raw = tostring_(curT)
         RB.status = "cur=[" .. (raw == "" and "<пусто>" or raw:sub(1, 16)) .. "](" .. #raw .. ")"
-        rprint("[Rebirth] Amount unreadable & no cache, raw len=" .. #raw)
-        RB.closePanel(g); RB.lastPeek = tick_(); return
+        rprint("[Rebirth] Amount unreadable & no cache, retry in 8s")
+        RB.closePanel(g)
+
+        RB.lastPeek = tick_() - (RB.peekEvery or 60) + 8
+        return
+        end
+    end
     end
 
-    local rbBtn = RB.node(g, "InvestorsMenu/Body/Rebirth")
-    if not rbBtn then RB.status = "REBIRTH button not found"; RB.closePanel(g); return end
-    RB.status = "reading gain..."
-    local cf, gainLog
+    local cashLog = RB.cashLog()
+    local cEff = (cashLog and RB.earnLog and RB.earnLog > cashLog) and RB.earnLog or cashLog
+    local estGain = cEff and RB.calcGainLog(cEff, curLog) or nil
+    local mult = RB.mult or 2
+    local th = curZero and 0.01 or (_log10(math.max(1, mult - 1)) + (curLog or 0))
+
+    if not autoRebirthActive then RB.status = "off"; return end
+    RB.status = "verifying via popup..."
+    RB.probeTryT = tick_()
+    local rbBtn = RB.node(RB.gui() or g, "InvestorsMenu/Body/Rebirth")
+    local cf
     for _ = 1, 3 do
         if not autoRebirthActive then RB.dismissAlert(); RB.status = "off"; return end
-        if not cf then RB.click(rbBtn) end
+        if rbBtn then RB.click(rbBtn) end
         for _ = 1, 6 do
             task_wait(0.4); RB.busyT = tick_()
-            local msg = RB.alertMsg()
-            if msg:upper():find("REBIRTH") then
-                cf = RB.findConfirm()
-                if cf then gainLog = gainLog or RB.gainFromMsg(msg) end
-            end
-            if cf and gainLog then break end
+            cf = RB.findConfirm()
+            if cf then break end
         end
-        if cf and gainLog then break end
+        if cf then break end
     end
-    if not (cf and gainLog) then
-        RB.status = "couldn't read gain"
-        rprint("[Rebirth] rebirth popup / gain not readable - retry in 60s")
-        RB.dismissAlert(); RB.closePanel(g)
-        RB.lastPeek = tick_(); return
+    if not cf then
+        RB.status = "confirm popup not found"
+        rprint("[Rebirth] REBIRTH pressed, no confirm popup - retry in 60s")
+        RB.dismissAlert(); RB.lastPeek = tick_()
+        if (tick_() - (RB.lastReb or 0)) >= 5 then RB.closePanel(g) end
+        return
     end
+    local trueGain = RB.gainFromMsg(RB.alertMsg())
+    if trueGain then
+        RB.pct = curZero and 100 or math.min(999, 10 ^ (trueGain - th) * 100)
+        RB.lastInfo = RB.fmtPct(RB.pct)
+        if trueGain < th then
 
-    local mult = RB.mult or 2
-    local go, pct
-    if curZero then
-        go, pct = true, 100
+            RB.calibrate(trueGain, curLog, cashLog)
+            RB.go = false; RB.goN = 0
+            RB.status = sformat("x%d  |  %s  |  wait", mult, RB.lastInfo)
+            rprint("[Rebirth] popup says " .. RB.lastInfo .. " (early) - calibrated, waiting")
+            RB.dismissAlert(); RB.closePanel(g)
+            RB.lastPeek = tick_()
+            return
+        end
     else
-        local th = _log10(math.max(1, mult - 1)) + curLog
-        go = gainLog >= th
-        pct = math.min(999, 10 ^ (gainLog - th) * 100)
-    end
-    RB.pendGain = gainLog
-    RB.go = go; RB.pct = pct
-    RB.lastInfo = RB.fmtPct(pct)
-    RB.status = sformat("x%d  |  %s  |  %s", mult, RB.lastInfo, go and "GO" or "wait")
 
-    if go and autoRebirthActive then
-        RB.confirmRebirth(cf)
-    else
-        RB.dismissAlert()
+        if not (estGain and estGain >= th) then
+            RB.status = "popup unreadable - safe abort"
+            rprint("[Rebirth] popup gain unreadable, est below threshold - abort, retry in 60s")
+            RB.dismissAlert(); RB.closePanel(g); RB.lastPeek = tick_()
+            return
+        end
     end
+    RB.pendGain = trueGain or estGain
+    RB.go = true
+    RB.confirmRebirth(cf)
 
     if (tick_() - (RB.lastReb or 0)) >= 5 then RB.closePanel(g) end
 end
@@ -2878,12 +3347,23 @@ function RB.tick()
     local now = tick_()
     if (now - (RB.lastReb or 0)) < 30 then RB.go = false; RB.status = "cooldown"; return end
 
-    if (now - (S.lastUser or 0)) < 5 then RB.go = false; RB.status = "idle"; return end
+    if (now - (RB.softT or 0)) >= 6 then
+        RB.softT = now
+        pcall_(RB.computeDecision)
+    end
 
-    if MG.active and (now - (MG.busyT or 0)) < 5 then RB.go = false; RB.status = "waiting: minigame"; return end
-    if autoStandActive and (now - (LSM.standPassT or 0)) < 3 then RB.go = false; RB.status = "waiting: auto stand"; return end
-    if (now - (RB.lastPeek or 0)) < (RB.peekEvery or 60) then
-        RB.go = false; RB.status = "idle"
+    local fire = ((RB.go and (RB.goN or 0) >= 2) or RB.needCur) and true or false
+
+    if (now - (S.lastUser or 0)) < 5 then return end
+
+    if MG.active and (now - (MG.busyT or 0)) < 5 then RB.status = "waiting: minigame"; return end
+
+    if autoStandActive and (LSM.standBusyT or 0) ~= 0 and ((now - (LSM.standPassT or 0)) < 3 or (now - (LSM.standBusyT or 0)) < 4) then
+
+        if fire and (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then RB.wantSlot = true end
+        RB.status = "waiting: auto stand"; return
+    end
+    if (not fire) or (now - (RB.lastPeek or 0)) < (RB.peekEvery or 60) then
 
         local g = RB.gui()
         if g and (RB.panelOpen(g) or RB.findConfirm()) then RB.ensureClosed(g) end
@@ -2893,7 +3373,8 @@ function RB.tick()
     if not g then RB.status = "Rebirth gui not found"; return end
     RB.lastPeek = now
     pcall_(function() RB.runCheck(g) end)
-    RB.busyT = 0
+    RB.busyT = 0; RB.checkStartT = 0
+    LSM.zoomInT = 0
     RB.openedAt = nil
 end
 _wrap("auto-rebirth", function()
@@ -3252,6 +3733,19 @@ _wrap("auto-stand", function()
             continue
         end
 
+        if autoRebirthActive and RB.wantSlot then
+            local w0 = tick_()
+            while ScriptActive and autoStandActive and autoRebirthActive
+                  and RB.wantSlot and (tick_() - w0) < 35 do
+                task_wait(0.3)
+            end
+            if RB.wantSlot and (tick_() - w0) >= 35 then
+                RB.wantSlot = false
+            else
+                continue
+            end
+        end
+
         if MG.lemBusy() then
             task_wait(0.5)
             continue
@@ -3259,6 +3753,8 @@ _wrap("auto-stand", function()
 
         local res = runLocationsPass(firstRun)
         firstRun = false
+
+        LSM.standBusyT = 0
         if res == "off" then
             task_wait(0.05)
             continue
@@ -3294,4 +3790,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v19.6 loaded  |  by Inspecttor")
+rprint("sell lemons v20 loaded  |  by Inspecttor")
