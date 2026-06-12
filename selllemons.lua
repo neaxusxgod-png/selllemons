@@ -688,10 +688,16 @@ if homesick then
     end):addKeybind("5", "Toggle", true, function() end)
     pcall_(function()
 
-        UIRef.t.RebirthMult = left:addSlider("rebirthPct", "Rebirth at +%", 1, 10000, 25, function(val)
+        UIRef.t.RebirthMult = left:addSlider("rebirthPct", "Rebirth at +%", 1, 100, 25, function(val)
             local m = mfloor(tonumber_(val) or 25)
-            if m < 1 then m = 1 elseif m > 10000 then m = 10000 end
+            if m < 1 then m = 1 elseif m > 100 then m = 100 end
             RB.gainPct = m
+        end)
+
+        UIRef.t.RebirthBoost = left:addSlider("rebirthBoost", "Threshold x", 1, 100, 1, function(val)
+            local m = mfloor(tonumber_(val) or 1)
+            if m < 1 then m = 1 elseif m > 100 then m = 100 end
+            RB.thBoost = m
         end)
     end)
 
@@ -3177,10 +3183,13 @@ function RB.pctColor(p)
 end
 
 function RB.thPct()
-    return math.min(10000, RB.gainPct or 25)
+    return math.min(10000, (RB.gainPct or 25) * (RB.thBoost or 1))
 end
+
 function RB.thStr()
-    return "+" .. RB.thPct() .. "%"
+    local t = RB.thPct()
+    if t < 100 then return "+" .. t .. "%" end
+    return "x" .. (sformat("%g", 1 + t / 100))
 end
 
 function RB.closePanel(g)
