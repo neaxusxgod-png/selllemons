@@ -69,6 +69,7 @@ local function _wrap(tag, fn)
 end
 
 local autoBuyActive    = false
+local skipDecorActive  = false
 local lemonFarmActive  = false
 local cashFarmActive   = true
 local autoStandActive  = false
@@ -631,9 +632,29 @@ local function getStandLocations()
     return out
 end
 
+local function getBuyLocations()
+    local out = {}
+    if not myTycoon then return out end
+    local pur, loc
+    pcall_(function() pur = myTycoon:FindFirstChild("Purchases") end)
+    pcall_(function() loc = myTycoon:FindFirstChild("Locations") end)
+    if not pur then return out end
+    for _, cat in ipairs_(pur:GetChildren()) do
+        local nm = tostring_(cat.Name)
+        local pos
+        if loc then
+            local lc = loc:FindFirstChild(nm)
+            if lc then pos = _standPartPos(lc) end
+        end
+        if not pos then pcall_(function() pos = _standPartPos(cat) end) end
+        if pos then out[#out + 1] = { name = nm, pos = pos } end
+    end
+    return out
+end
+
 if homesick then
     pcall_(function() homesick.changelogEnabled = false end)
-    local window = homesick.createWindow("Sell Lemons", 480, 480)
+    local window = homesick.createWindow("Sell Lemons", 480, 520)
 
     UIRef.win = window
 
@@ -644,10 +665,19 @@ if homesick then
     UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
         autoBuyActive = val
 
-        if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end) end
+        if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
+        else pcall_(function() localQueue = {}; queueIndex = 1 end) end
         S.saveState()
         print("[Hub] toggle AutoBuy = " .. tostring_(val))
     end):addKeybind("1", "Toggle", true, function() end)
+
+    UIRef.t.SkipDecor = left:addToggle("skipDecor", "Skip Decor (Auto Buy)", false, function(val)
+        skipDecorActive = val
+        S.saveState()
+        print("[Hub] toggle SkipDecor = " .. tostring_(val))
+    end)
+
+    pcall_(function() left:addSeparator() end)
 
     UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
         lemonFarmActive = val
@@ -798,15 +828,48 @@ local function isGreyedOut(v)
     local ok, color3 = pcall_(function() return v.Color end)
     if not ok or not color3 then return false end
     local r, g, b = normalizeColor(color3)
-    return mabs(r - g) < 30 and mabs(g - b) < 30 and mabs(r - b) < 30 and r < 200
+
+    return mabs(r - g) < 14 and mabs(g - b) < 14 and mabs(r - b) < 14 and mabs(r - 102) <= 22
+end
+
+local decorFolderMemo = {}
+local function _isDecorBtn(btn, key)
+    if not btn then return false end
+    key = key or getButtonKey(btn)
+    local inDecor = key and decorFolderMemo[key]
+    if inDecor == nil then
+        inDecor = false
+        pcall_(function()
+            local cur, prev = btn.Parent, nil
+            for _ = 1, 8 do
+                if not cur then break end
+                local nm = tostring_(cur.Name)
+                if nm == "Buttons" then
+                    if prev == "Decor" then inDecor = true end
+                    return
+                end
+                prev = nm
+                cur = cur.Parent
+            end
+        end)
+        if key then decorFolderMemo[key] = inDecor end
+    end
+    if inDecor then return true end
+    local red = false
+    pcall_(function()
+        local c = btn.Color
+        if c then
+            local r, g, b = normalizeColor(c)
+            if r >= 140 and g <= 75 and b <= 75 then red = true end
+        end
+    end)
+    return red
 end
 
 local buttonsFolders   = {}
 local buttonsFolderSet = {}
 local buttonsCacheReady = false
 local purchasesConnSet = {}
-
-local strayFolderPaths = {}
 
 local function addButtonsFolder(folder)
     if not folder or buttonsFolderSet[folder] then return end
@@ -817,10 +880,7 @@ local function addButtonsFolder(folder)
             if not parent then
                 buttonsFolderSet[folder] = nil
                 for i = #buttonsFolders, 1, -1 do
-                    if buttonsFolders[i] == folder then
-                        table.remove(buttonsFolders, i)
-                        break
-                    end
+                    if buttonsFolders[i] == folder then table.remove(buttonsFolders, i); break end
                 end
             end
         end)
@@ -839,66 +899,28 @@ local function hookPurchaseCategory(cat)
     end)
 end
 
-local function discoverStrayPaths(purchases)
-    for _, d in ipairs_(purchases:GetDescendants()) do
-        if d.Name == "Button" and d:IsA("BasePart") then
-            local chain, cur = {}, d
-            for _ = 1, 12 do
-                local p = cur.Parent
-                if not p or tostring_(p.Name) == "Purchases" then break end
-                chain[#chain + 1] = p
-                cur = p
-            end
-            local hasButtons = false
-            for i = 1, #chain do
-                if tostring_(chain[i].Name) == "Buttons" then hasButtons = true break end
-            end
-            if not hasButtons and #chain >= 2 then
-                local sub = chain[#chain - 1]
-                if tostring_(sub.ClassName) == "Folder" then
-                    addButtonsFolder(sub)
-                    local cn = tostring_(chain[#chain].Name)
-                    strayFolderPaths[cn] = strayFolderPaths[cn] or {}
-                    strayFolderPaths[cn][tostring_(sub.Name)] = true
-                end
-            end
-        end
-    end
-end
-
 local function buildButtonsCache()
     buttonsFolders, buttonsFolderSet, purchasesConnSet = {}, {}, {}
     buttonsCacheReady = false
     if not myTycoon then return end
     local purchases = myTycoon:FindFirstChild("Purchases")
     if not purchases then return end
-
-    for _, cat in ipairs_(purchases:GetChildren()) do
-        hookPurchaseCategory(cat)
-    end
-    pcall_(function() discoverStrayPaths(purchases) end)
+    for _, cat in ipairs_(purchases:GetChildren()) do hookPurchaseCategory(cat) end
     pcall_(function()
-        purchases.ChildAdded:Connect(function(newCat)
-            hookPurchaseCategory(newCat)
-        end)
+        purchases.ChildAdded:Connect(function(newCat) hookPurchaseCategory(newCat) end)
     end)
     buttonsCacheReady = true
 end
-
 buildButtonsCache()
 
-local _bScan = { t = 0, list = nil }
+local _acache = { t = 0, list = nil }
 local function getButtonsRealTime()
+    local now = tick_()
+    if _acache.list and (now - _acache.t) < 0.12 then return _acache.list end
     if not buttonsCacheReady then
         buildButtonsCache()
         if not buttonsCacheReady then return {} end
     end
-
-    local now = tick_()
-    if _bScan.list and (now - _bScan.t) < 0.12 then
-        return _bScan.list
-    end
-
     local temp = {}
     local list = buttonsFolders
     for i = 1, #list do
@@ -906,31 +928,16 @@ local function getButtonsRealTime()
         if bf and bf.Parent then
             for _, model in ipairs_(bf:GetChildren()) do
                 local btn = model:FindFirstChild("Button")
-                if btn and btn:IsA("BasePart") and btn.Parent then
-                    tinsert(temp, btn)
-                end
+                if btn and btn:IsA("BasePart") and btn.Parent then tinsert(temp, btn) end
                 for _, child in ipairs_(model:GetDescendants()) do
-                    if child.Name == "Button" and child ~= btn
-                       and child:IsA("BasePart") and child.Parent then
+                    if child.Name == "Button" and child ~= btn and child:IsA("BasePart") and child.Parent then
                         tinsert(temp, child)
                     end
                 end
             end
         end
     end
-
-    if #temp <= 60 then
-        local byKey = {}
-        for i = 1, #temp do
-            local k = getButtonKey(temp[i])
-            if k then byKey[k] = temp[i] end
-        end
-        _bScan.byKey = byKey
-    else
-        _bScan.byKey = nil
-    end
-    _bScan.list = temp
-    _bScan.t = now
+    _acache.list = temp; _acache.t = now
     return temp
 end
 
@@ -1112,117 +1119,63 @@ local lastResetTime = 0
 local function appendNewButtons()
     while queueLock do task_wait(0.001) end
     queueLock = true
-
-    if not myTycoon or not myTycoon.Parent then
-        queueLock = false
-        return 0
-    end
-
+    if not myTycoon or not myTycoon.Parent then queueLock = false; return 0 end
     local buttons = getButtonsRealTime()
     lastButtonCount = #buttons
-
     local existingKeys = {}
     local lq = localQueue
-    local lqLen = #lq
-    for i = queueIndex, lqLen do
+    for i = queueIndex, #lq do
         local it = lq[i]
         if it and it.key then existingKeys[it.key] = true end
     end
-
     local chr = player.Character
     local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
     local hrpPos = hrp and hrp.Position or nil
     local added = 0
-
-    local newItems = {}
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
             local fails = failedButtons[key] or 0
-            if not existingKeys[key] and buyReady(key, v) and not isGreyedOut(v) and not isBlacklisted(key, v) then
+            if not existingKeys[key] and fails < 2 and not isGreyedOut(v) and not buyBlacklist[key]
+               and not (skipDecorActive and _isDecorBtn(v, key)) then
                 local dist = hrpPos and (v.Position - hrpPos).Magnitude or 999999
-                newItems[#newItems + 1] = {
-                    btn   = v,
-                    key   = key,
-                    dist  = dist,
-                    fails = fails
-                }
+                tinsert(lq, { btn = v, key = key, dist = dist, fails = fails })
                 added = added + 1
             end
         end
     end
-
-    table.sort(newItems, function(a, b) return a.dist < b.dist end)
-    for i = 1, #newItems do tinsert(lq, newItems[i]) end
-
     queueLock = false
     return added
 end
 
 local function allButtonsDead()
     local now = tick_()
-    if _bScan.deadT and (now - _bScan.deadT) < 0.15 then return _bScan.dead end
-    local dead = true
+    if _acache.deadT and (now - _acache.deadT) < 0.15 then return _acache.dead end
     local buttons = getButtonsRealTime()
-    if #buttons == 0 then
-        dead = false
-    else
-        for _, v in ipairs_(buttons) do
-            local key = getButtonKey(v)
-            if key then
-                local a = buyAttempt[key]
-                if a and a.inst and a.inst ~= v then buyAttempt[key] = nil; a = nil end
-                local givenUp = a and a.n >= 6
-                if not isBlacklisted(key, v) and not isGreyedOut(v) and not givenUp then
-                    dead = false
-                    break
-                end
-            end
-        end
-    end
-    _bScan.deadT = now
-    _bScan.dead = dead
-    return dead
-end
-
-local function anyGivenUpButtons()
-    local now = tick_()
-    if _bScan.giveT and (now - _bScan.giveT) < 0.15 then return _bScan.give end
-    local found = false
-    local buttons = getButtonsRealTime()
+    local dead = (#buttons > 0)
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
-            local a = buyAttempt[key]
-            if a and a.inst and a.inst ~= v then
-                buyAttempt[key] = nil
-            elseif a and a.n >= 6 and not isBlacklisted(key, v) then
-                found = true
-                break
-            end
+            local fails = failedButtons[key] or 0
+            if fails < 2 and not buyBlacklist[key] and not isGreyedOut(v)
+               and not (skipDecorActive and _isDecorBtn(v, key)) then dead = false; break end
         end
     end
-    _bScan.giveT = now
-    _bScan.give = found
-    return found
+    _acache.deadT = now; _acache.dead = dead
+    return dead
 end
 
 local function cleanupQueue()
     while queueLock do task_wait(0.001) end
     queueLock = true
-
     if queueIndex > 20 then
         local newQueue = {}
         local lq = localQueue
         local n = 0
-        for i = queueIndex, #lq do
-            n = n + 1
-            newQueue[n] = lq[i]
-        end
+        for i = queueIndex, #lq do n = n + 1; newQueue[n] = lq[i] end
         localQueue = newQueue
         queueIndex = 1
     end
-
     queueLock = false
 end
 
@@ -1252,45 +1205,27 @@ end
 
 local function _anyLiveButtons()
     local now = tick_()
-    if _bScan.liveT and (now - _bScan.liveT) < 0.15 then return _bScan.live end
-    local live = false
+    if _acache.liveT and (now - _acache.liveT) < 0.15 then return _acache.live end
     local buttons = getButtonsRealTime()
+    local live = false
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
-            local a = buyAttempt[key]
-            if a and a.inst and a.inst ~= v then buyAttempt[key] = nil; a = nil end
-            local givenUp = a and a.n >= 6
-            if not isBlacklisted(key, v) and not isGreyedOut(v) and not givenUp then
-                live = true
-                break
-            end
+            local fails = failedButtons[key] or 0
+            if fails < 2 and not buyBlacklist[key] and not isGreyedOut(v)
+               and not (skipDecorActive and _isDecorBtn(v, key)) then live = true; break end
         end
     end
-    _bScan.liveT = now
-    _bScan.live = live
+    _acache.liveT = now; _acache.live = live
     return live
 end
 
 local function _anyBuyableNowButtons()
-    local now = tick_()
-    if _bScan.buyNowT and (now - _bScan.buyNowT) < 0.15 then return _bScan.buyNow end
-    local live = false
-    local buttons = getButtonsRealTime()
-    for _, v in ipairs_(buttons) do
-        local key = getButtonKey(v)
-        if key then
-            if not isBlacklisted(key, v) and not isGreyedOut(v) and buyReady(key, v) then
-                live = true
-                break
-            end
-        end
-    end
-    _bScan.buyNowT = now
-    _bScan.buyNow = live
-    return live
-end
 
+    if (tick_() % 25) < 5 then return false end
+    return _anyLiveButtons()
+end
+local function _autobuyHasWork() return (#localQueue - queueIndex + 1) > 0 end
 local STAND_E_SPAM_DURATION = 1.5
 
 local function runLocationsPass(firstRun)
@@ -1352,41 +1287,28 @@ end
 
 _wrap("autobuy-worker", function()
     local emptyStreak = 0
-
     while ScriptActive do
         syncFromUI()
-        if not autoBuyActive then
-            task_wait(0.05)
-            continue
-        end
-        if _standIsTapping or LSM.lemonSlot == true then
-            task_wait(0.05)
-            continue
-        end
+        if not autoBuyActive then task_wait(0.05); continue end
+
+        if _standIsTapping or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy()
+           or (autoRebirthActive and RB.wantSlot) then task_wait(0.05); continue end
 
         local character = player.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        if not hrp or not myTycoon then
-            task_wait(0.05)
-            continue
-        end
+        if not hrp or not myTycoon then task_wait(0.05); continue end
 
-        getButtonsRealTime()
         local item = nil
-        local lq  = localQueue
+        local lq = localQueue
         while queueIndex <= #lq do
             local candidate = lq[queueIndex]
             queueIndex = queueIndex + 1
-
-            if candidate and candidate.key then
-                local live = (_bScan.byKey and _bScan.byKey[candidate.key]) or candidate.btn
-                if live and live.Parent then
-                    local key = candidate.key
-                    if buyReady(key, live) and not isGreyedOut(live) and not isBlacklisted(key, live) then
-                        candidate.btn = live
-                        item = candidate
-                        break
-                    end
+            if candidate and candidate.btn and candidate.btn.Parent then
+                local key = candidate.key
+                local fails = failedButtons[key] or 0
+                if fails < 2 and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
+                   and not (skipDecorActive and _isDecorBtn(candidate.btn, key)) then
+                    item = candidate; break
                 end
             end
         end
@@ -1396,20 +1318,16 @@ _wrap("autobuy-worker", function()
             if remaining <= 0 then
                 local added = appendNewButtons()
                 if added > 0 then
-                    print("[Worker] Appended: +" .. added)
                     lq = localQueue
                     while queueIndex <= #lq do
                         local candidate = lq[queueIndex]
                         queueIndex = queueIndex + 1
-                        if candidate and candidate.key then
-                            local live = (_bScan.byKey and _bScan.byKey[candidate.key]) or candidate.btn
-                            if live and live.Parent then
-                                local key = candidate.key
-                                if buyReady(key, live) and not isGreyedOut(live) and not isBlacklisted(key, live) then
-                                    candidate.btn = live
-                                    item = candidate
-                                    break
-                                end
+                        if candidate and candidate.btn and candidate.btn.Parent then
+                            local key = candidate.key
+                            local fails = failedButtons[key] or 0
+                            if fails < 2 and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
+                               and not (skipDecorActive and _isDecorBtn(candidate.btn, key)) then
+                                item = candidate; break
                             end
                         end
                     end
@@ -1418,31 +1336,19 @@ _wrap("autobuy-worker", function()
         end
 
         if not item then
-            if allButtonsDead() then
 
-                if anyGivenUpButtons() then
-                    local now = tick_()
-                    if now - lastResetTime > 2 then
-                        lastResetTime = now
-                        print("[Worker] given-up retry -> reset")
-                        resetBuyBlacklist()
-                        localQueue = {}
-                        queueIndex = 1
-                        appendNewButtons()
-                    end
-                else
-                    task_wait(0.3)
+            LSM.buySweepT = 0
+            if allButtonsDead() then
+                local now = tick_()
+                if now - lastResetTime > 2 then
+                    lastResetTime = now
+                    resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
                 end
             else
                 emptyStreak = emptyStreak + 1
-                if emptyStreak > 10 then
-                    emptyStreak = 0
-                    appendNewButtons()
-                end
+                if emptyStreak > 10 then emptyStreak = 0; appendNewButtons() end
             end
-
-            task_wait(CFG.slow and 0.3 or 0.12)
-            continue
+            task_wait(0.05); continue
         end
 
         emptyStreak = 0
@@ -1451,101 +1357,42 @@ _wrap("autobuy-worker", function()
         local btn = item.btn
         local pos = btn.Position
         local px, py, pz = pos.X, pos.Y, pos.Z
-
+        LSM.lastBot = tick_(); LSM.buySweepT = tick_()
         pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
         task_wait(0.03)
-
-        local bought = false
-        local t0 = tick_()
-        while ScriptActive and (tick_() - t0) < CFG.buyWindow do
-            pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-            task_wait(0.05)
-            local gone = true
-            pcall_(function()
-                gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon))
-            end)
-
-            if not gone then
-                pcall_(function()
-                    local model = btn.Parent
-                    if model and model:GetAttribute("Purchased") == true then gone = true end
-                end)
-            end
-            if gone then bought = true; break end
-
-            if isGreyedOut(btn) then break end
-        end
-
-        if bought then
-            buyBlacklist[key]  = btn
-            failedButtons[key] = nil
-            buyAttempt[key]    = nil
-            totalBought = totalBought + 1
-            print("[Worker] BOUGHT: " .. key .. " | Total: " .. totalBought)
-        else
-            markBuyFail(key, btn)
+        pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
+        task_wait(0.03)
+        LSM.lastBot = tick_(); LSM.buySweepT = tick_()
+        task_wait(0.04)
+        local stillExists = false
+        pcall_(function() stillExists = btn and btn.Parent and btn:IsDescendantOf(myTycoon) end)
+        if stillExists then
+            local nf = (failedButtons[key] or 0) + 1
+            failedButtons[key] = nf
             totalFailed = totalFailed + 1
-            print("[Worker] retry-later: " .. key .. " | n=" .. (buyAttempt[key] and buyAttempt[key].n or 0))
-
+        else
+            buyBlacklist[key]  = true
+            failedButtons[key] = nil
+            totalBought = totalBought + 1
+            print("[Buy] " .. key .. " | Total: " .. totalBought)
         end
 
-        if totalBought % 20 == 0 then
-            cleanupQueue()
-        end
+        if totalBought % 20 == 0 then cleanupQueue() end
     end
 end)
 
 _wrap("autobuy-coord", function()
     while ScriptActive do
         syncFromUI()
-        if not autoBuyActive then
-            task_wait(0.2)
-            continue
-        end
-        if _standIsTapping or LSM.lemonSlot == true then
-            task_wait(0.2)
-            continue
-        end
-
-        if (tick_() - (_bScan.foldT or 0)) > 8 then
-            _bScan.foldT = tick_()
-            _bScan.foldN = (_bScan.foldN or 0) + 1
-            pcall_(function()
-                local pur = myTycoon and myTycoon:FindFirstChild("Purchases")
-                if not pur then return end
-
-                if _bScan.foldN % 3 == 0 then pcall_(function() discoverStrayPaths(pur) end) end
-                local fresh = {}
-                for _, cat in ipairs_(pur:GetChildren()) do
-                    local bf = cat:FindFirstChild("Buttons")
-                    if bf then fresh[#fresh + 1] = bf end
-                    local subs = strayFolderPaths[tostring_(cat.Name)]
-                    if subs then
-                        for sn in pairs_(subs) do
-                            local sf = cat:FindFirstChild(sn)
-                            if sf then fresh[#fresh + 1] = sf end
-                        end
-                    end
-                end
-                if #fresh > 0 then
-                    local set = {}
-                    for i = 1, #fresh do set[fresh[i]] = true end
-                    buttonsFolders, buttonsFolderSet = fresh, set
-                    _bScan.t = 0
-                end
-            end)
-        end
+        if not autoBuyActive then task_wait(0.2); continue end
+        if _standIsTapping then task_wait(0.2); continue end
 
         if not myTycoon or not myTycoon.Parent then
             myTycoon = findMyTycoon()
             if myTycoon then
-                resetBuyBlacklist()
-                localQueue = {}
-                queueIndex = 1
-                print("[Coord] Tycoon re-found!")
+                resetBuyBlacklist(); localQueue = {}; queueIndex = 1; buildButtonsCache()
             else
-                task_wait(0.5)
-                continue
+                task_wait(0.5); continue
             end
         end
 
@@ -1553,22 +1400,13 @@ _wrap("autobuy-coord", function()
         if remaining == 0 then
             local added = appendNewButtons()
             if added > 0 then
-                print("[Coord] Refill on empty: " .. added)
                 task_wait(0.05)
             elseif allButtonsDead() then
-                if anyGivenUpButtons() then
-                    local now = tick_()
-                    if now - lastResetTime > 2 then
-                        lastResetTime = now
-                        print("[Coord] given-up retry -> reset + scan")
-                        resetBuyBlacklist()
-                        localQueue = {}
-                        queueIndex = 1
-                        appendNewButtons()
-                        task_wait(0.05)
-                    else
-                        task_wait(0.5)
-                    end
+                local now = tick_()
+                if now - lastResetTime > 2 then
+                    lastResetTime = now
+                    resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
+                    task_wait(0.05)
                 else
                     task_wait(0.5)
                 end
@@ -1579,45 +1417,6 @@ _wrap("autobuy-coord", function()
         end
 
         task_wait(0.3)
-    end
-end)
-
-_wrap("buy-spy", function()
-    while ScriptActive do
-        task_wait(5)
-        if autoBuyActive then
-            pcall_(function()
-                local chr = player.Character
-                local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
-                if not hrp then return end
-                local hp = hrp.Position
-                local best, bd
-                for _, v in ipairs_(getButtonsRealTime()) do
-                    if v and v.Parent then
-                        local d = (v.Position - hp).Magnitude
-                        if d < 35 and (not bd or d < bd) then bd = d; best = v end
-                    end
-                end
-                if not best then print("[BuySpy] рядом (<35) кнопок в СКАНЕ нет | папок=" .. #buttonsFolders .. " очередь=" .. (#localQueue - queueIndex + 1)); return end
-                local key = getButtonKey(best) or "?"
-                local a = buyAttempt[key]
-                local inQ = false
-                for i = queueIndex, #localQueue do
-                    local it = localQueue[i]
-                    if it and it.key == key then inQ = true; break end
-                end
-                local nm = "?"; pcall_(function() nm = best.Parent.Name end)
-                print(sformat("[BuySpy] %s d=%d | n=%s next_in=%s | grey=%s black=%s inQueue=%s ready=%s | очередь=%d",
-                    tostring_(nm), mfloor(bd or 0),
-                    tostring_(a and a.n or 0),
-                    a and sformat("%.1f", a.next - tick_()) or "-",
-                    tostring_(isGreyedOut(best)),
-                    tostring_(isBlacklisted(key, best)),
-                    tostring_(inQ),
-                    tostring_(buyReady(key, best)),
-                    #localQueue - queueIndex + 1))
-            end)
-        end
     end
 end)
 
@@ -1848,7 +1647,7 @@ local function processLemon(v, hrp)
     if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
 
     if not _windowFocused() then return false end
-    if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then return false end
+    if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4 then return false end
 
     if not LSM.zoomedIn then return false end
 
@@ -1953,8 +1752,8 @@ local function processSnapshot(snapshot, hrp)
     for _, tree in ipairs_(groupOrder) do
         if not lemonFarmActive then break end
         if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
-        if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
-        if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then break end
+        if autoBuyActive and not LSM.lemonSlot and _autobuyHasWork() then break end
+        if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4 then break end
         if not LSM.zoomedIn then break end
         if not _windowFocused() then break end
         local fruits = groups[tree]
@@ -1971,8 +1770,8 @@ local function processSnapshot(snapshot, hrp)
         for i = 1, #fruits do
             if not lemonFarmActive then break end
             if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
-            if autoBuyActive and not LSM.lemonSlot and (#localQueue - queueIndex + 1) > 0 then break end
-            if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then break end
+            if autoBuyActive and not LSM.lemonSlot and _autobuyHasWork() then break end
+            if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4 then break end
             if not LSM.zoomedIn then break end
             if not _windowFocused() then break end
 
@@ -2008,7 +1807,7 @@ _wrap("lemon-farm", function()
         local character = player.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
 
-        local buyBusy = lemonFarmActive and autoBuyActive and (#localQueue - queueIndex + 1) > 0
+        local buyBusy = lemonFarmActive and autoBuyActive and _autobuyHasWork()
         if lemonFarmActive and LSM.annBuy ~= buyBusy then
             LSM.annBuy = buyBusy
             print(buyBusy and "[Lemon] pause: autobuy buying" or "[Lemon] autobuy done -> resume")
@@ -2021,7 +1820,8 @@ _wrap("lemon-farm", function()
                 LSM.buyProgressT = tick_()
             end
             if not LSM.buyProgressT then LSM.buyProgressT = tick_() end
-            if (tick_() - LSM.buyProgressT) > CFG.buyStuck then LSM.lemonSlot = true end
+
+            if (tick_() - LSM.buyProgressT) > CFG.buyStuck and (tick_() - (LSM.buySweepT or 0)) >= 4 then LSM.lemonSlot = true end
         else
             LSM.buyProgressT = nil
             LSM.lastBoughtN = totalBought
@@ -2054,7 +1854,7 @@ _wrap("lemon-farm", function()
         end
 
         local rbBusy = (tick_() - (RB.busyT or 0)) < 4 and (tick_() - (RB.checkStartT or 0)) < 30
-        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or rbBusy or MG.lemBusy()
+        local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or rbBusy or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4
 
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
 
@@ -2313,7 +2113,7 @@ local function pollInput()
         local m1 = false
         pcall_(function() m1 = ismouse1pressed() end)
 
-        if autoBuyActive and (#localQueue - queueIndex + 1) > 0 then
+        if autoBuyActive and _autobuyHasWork() then
             S.busyT = nowA
         end
         local botPhase = (lemonFarmActive and LSM.annAfk == true)
@@ -2408,8 +2208,7 @@ local function pollInput()
     S.stY = vy0 + 16
     if lemonFarmActive then
         local txt
-        local qRem = #localQueue - queueIndex + 1
-        if autoBuyActive and qRem > 0 then
+        if autoBuyActive and _autobuyHasWork() then
             txt = "lemon farm  |  paused: buy"
         elseif autoStandActive and (nowA - (LSM.standBusyT or 0)) < 4 then
             txt = "lemon farm  |  paused: stand"
@@ -3100,15 +2899,20 @@ end
 
 function RB.confirmRebirth(cf)
     if not autoRebirthActive then RB.status = "off"; return end
+    local function pressConfirm()
+        RB.prepClick()
+        local c = RB.findConfirm() or cf
+        if c then RB.click(c) end
+    end
     local cashBefore = RB.cashLog()
-    RB.click(cf)
+    pressConfirm()
     local done = false
     for i = 1, 2 do
         task_wait(1.2); RB.busyT = tick_()
         local cashNow = RB.cashLog()
         if cashBefore and cashNow and cashNow < cashBefore - 3 then done = true; break end
         if not RB.findConfirm() then done = true; break end
-        if i == 1 then RB.click(cf) end
+        if i == 1 then pressConfirm() end
     end
     if done then
         RB.lastReb = tick_(); RB.lastPeek = tick_(); RB.goSince = 0; RB.go = false
@@ -3741,6 +3545,11 @@ _wrap("auto-stand", function()
         end
 
         if autoBuyActive and _anyBuyableNowButtons() then
+            task_wait(0.3)
+            continue
+        end
+
+        if (tick_() - (LSM.buySweepT or 0)) < 4 then
             task_wait(0.3)
             continue
         end
