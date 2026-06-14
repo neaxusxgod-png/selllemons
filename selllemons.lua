@@ -1,3 +1,4 @@
+
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -170,8 +171,6 @@ local function findMyTycoon()
     return nil
 end
 myTycoon = findMyTycoon()
-
-print("=== SELL LEMONS v18.39 ===")
 
 local drawObjs = {}
 local function D(typ, props)
@@ -350,21 +349,25 @@ do
     local ok, err = pcall_(function()
         local src = game:HttpGet("https://raw.githubusercontent.com/sharedechoes/Matcha-Luas/refs/heads/main/homesick.lua")
 
-        src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(255, 226, 58),')
-        src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(20, 20, 16),')
-        src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(28, 28, 20),')
-        src = src:gsub('surface2 = c3%(44, 40, 37%),', 'surface2 = c3(40, 40, 28),')
-        src = src:gsub('surface3 = c3%(54, 50, 46%),', 'surface3 = c3(52, 52, 36),')
-        src = src:gsub('border = c3%(60, 55, 52%),', 'border = c3(74, 74, 46),')
-        src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(182, 176, 138),')
+        src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(236, 238, 242),')
+        src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(15, 15, 18),')
+        src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(22, 22, 26),')
+        src = src:gsub('surface2 = c3%(44, 40, 37%),', 'surface2 = c3(32, 32, 37),')
+        src = src:gsub('surface3 = c3%(54, 50, 46%),', 'surface3 = c3(45, 45, 51),')
+        src = src:gsub('border = c3%(60, 55, 52%),', 'border = c3(66, 66, 73),')
+        src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(150, 152, 160),')
         src = src:gsub('%(ProjectState%.badgeText %.%. " | v1%.4%.0"%)', '(ProjectState.badgeText)')
         src = src:gsub('or "v1%.4%.0"', 'or ""')
 
-        src = src:gsub('bg = 1%.0,', 'bg = 0.68,')
-        src = src:gsub('surface = 1%.0,', 'surface = 0.70,')
-        src = src:gsub('surface2 = 1%.0,', 'surface2 = 0.78,')
-        src = src:gsub('surface3 = 1%.0,', 'surface3 = 0.82,')
-        src = src:gsub('border = 1%.0,', 'border = 0.9,')
+        src = src:gsub('bg = 1%.0,', 'bg = 0.52,')
+        src = src:gsub('surface = 1%.0,', 'surface = 0.58,')
+        src = src:gsub('surface2 = 1%.0,', 'surface2 = 0.66,')
+        src = src:gsub('surface3 = 1%.0,', 'surface3 = 0.74,')
+        src = src:gsub('border = 1%.0,', 'border = 0.85,')
+
+        src = src:gsub('line%(titleBarX, titleBarY %+ titleBarH, titleBarX %+ titleBarW, titleBarY %+ titleBarH, Theme%.border, 8%)', '')
+
+        src = src:gsub('rect%(titleBarX, titleBarY %+ titleBarH / 2, titleBarW, titleBarH / 2, Theme%.surface2, 7, 0%)', '')
         loadstring(src)()
     end)
     homesick = _G.homesick
@@ -733,7 +736,7 @@ if homesick then
 
     local right = tab1:addSection("Control", "Left")
 
-    pcall_(function() window:setBadge("Sell Lemons v20  |  by Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v21  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -774,6 +777,17 @@ if homesick then
             pcall_(function() UIRef.t.StopAll:SetValue(false) end)
         end)
     end)
+
+    pcall_(function() right:addSeparator() end)
+
+    UIRef.t.MenuToggle = right:addToggle("menuToggle", "Menu keybind", true, function(val)
+        pcall_(function()
+            if UIRef.win then
+                UIRef.win.visible = val and true or false
+                if UIRef.win.render then UIRef.win:render() end
+            end
+        end)
+    end):addKeybind("q", "Toggle", true, function() end)
 
     UIRef.standCb = {}
     UIRef.miniCb = {}
@@ -866,76 +880,42 @@ local function _isDecorBtn(btn, key)
     return red
 end
 
-local buttonsFolders   = {}
-local buttonsFolderSet = {}
-local buttonsCacheReady = false
-local purchasesConnSet = {}
-
-local function addButtonsFolder(folder)
-    if not folder or buttonsFolderSet[folder] then return end
-    buttonsFolderSet[folder] = true
-    tinsert(buttonsFolders, folder)
-    pcall_(function()
-        folder.AncestryChanged:Connect(function(_, parent)
-            if not parent then
-                buttonsFolderSet[folder] = nil
-                for i = #buttonsFolders, 1, -1 do
-                    if buttonsFolders[i] == folder then table.remove(buttonsFolders, i); break end
-                end
-            end
-        end)
-    end)
-end
-
-local function hookPurchaseCategory(cat)
-    if not cat or purchasesConnSet[cat] then return end
-    purchasesConnSet[cat] = true
-    local bf = cat:FindFirstChild("Buttons")
-    if bf then addButtonsFolder(bf) end
-    pcall_(function()
-        cat.ChildAdded:Connect(function(child)
-            if child.Name == "Buttons" then addButtonsFolder(child) end
-        end)
-    end)
-end
+local buttonsCacheReady = true
+local _acache = { t = 0, list = nil }
 
 local function buildButtonsCache()
-    buttonsFolders, buttonsFolderSet, purchasesConnSet = {}, {}, {}
-    buttonsCacheReady = false
-    if not myTycoon then return end
-    local purchases = myTycoon:FindFirstChild("Purchases")
-    if not purchases then return end
-    for _, cat in ipairs_(purchases:GetChildren()) do hookPurchaseCategory(cat) end
-    pcall_(function()
-        purchases.ChildAdded:Connect(function(newCat) hookPurchaseCategory(newCat) end)
-    end)
+
+    _acache.list = nil; _acache.deadT = nil; _acache.liveT = nil
+    if not myTycoon or not myTycoon.Parent then myTycoon = findMyTycoon() or myTycoon end
     buttonsCacheReady = true
 end
 buildButtonsCache()
 
-local _acache = { t = 0, list = nil }
 local function getButtonsRealTime()
     local now = tick_()
     if _acache.list and (now - _acache.t) < 0.12 then return _acache.list end
-    if not buttonsCacheReady then
-        buildButtonsCache()
-        if not buttonsCacheReady then return {} end
-    end
     local temp = {}
-    local list = buttonsFolders
-    for i = 1, #list do
-        local bf = list[i]
-        if bf and bf.Parent then
-            for _, model in ipairs_(bf:GetChildren()) do
-                local btn = model:FindFirstChild("Button")
-                if btn and btn:IsA("BasePart") and btn.Parent then tinsert(temp, btn) end
-                for _, child in ipairs_(model:GetDescendants()) do
-                    if child.Name == "Button" and child ~= btn and child:IsA("BasePart") and child.Parent then
-                        tinsert(temp, child)
+    local t = myTycoon
+    if not t or not t.Parent then t = findMyTycoon(); if t then myTycoon = t end end
+    if t then
+        pcall_(function()
+            local purchases = t:FindFirstChild("Purchases")
+            if not purchases then return end
+            for _, cat in ipairs_(purchases:GetChildren()) do
+                local bf = cat:FindFirstChild("Buttons")
+                if bf then
+                    for _, model in ipairs_(bf:GetChildren()) do
+                        local btn = model:FindFirstChild("Button")
+                        if btn and btn:IsA("BasePart") and btn.Parent then tinsert(temp, btn) end
+                        for _, child in ipairs_(model:GetDescendants()) do
+                            if child.Name == "Button" and child ~= btn and child:IsA("BasePart") and child.Parent then
+                                tinsert(temp, child)
+                            end
+                        end
                     end
                 end
             end
-        end
+        end)
     end
     _acache.list = temp; _acache.t = now
     return temp
@@ -1117,33 +1097,40 @@ local totalFailed  = 0
 local lastResetTime = 0
 
 local function appendNewButtons()
-    while queueLock do task_wait(0.001) end
-    queueLock = true
-    if not myTycoon or not myTycoon.Parent then queueLock = false; return 0 end
-    local buttons = getButtonsRealTime()
-    lastButtonCount = #buttons
-    local existingKeys = {}
-    local lq = localQueue
-    for i = queueIndex, #lq do
-        local it = lq[i]
-        if it and it.key then existingKeys[it.key] = true end
+
+    local waitT = tick_()
+    while queueLock do
+        if (tick_() - waitT) > 1 then queueLock = false; break end
+        task_wait(0.001)
     end
-    local chr = player.Character
-    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
-    local hrpPos = hrp and hrp.Position or nil
+    queueLock = true
     local added = 0
-    for _, v in ipairs_(buttons) do
-        local key = getButtonKey(v)
-        if key then
-            local fails = failedButtons[key] or 0
-            if not existingKeys[key] and fails < 2 and not isGreyedOut(v) and not buyBlacklist[key]
-               and not (skipDecorActive and _isDecorBtn(v, key)) then
-                local dist = hrpPos and (v.Position - hrpPos).Magnitude or 999999
-                tinsert(lq, { btn = v, key = key, dist = dist, fails = fails })
-                added = added + 1
+    pcall_(function()
+        if not myTycoon or not myTycoon.Parent then return end
+        local buttons = getButtonsRealTime()
+        lastButtonCount = #buttons
+        local existingKeys = {}
+        local lq = localQueue
+        for i = queueIndex, #lq do
+            local it = lq[i]
+            if it and it.key then existingKeys[it.key] = true end
+        end
+        local chr = player.Character
+        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+        local hrpPos = hrp and hrp.Position or nil
+        for _, v in ipairs_(buttons) do
+            local key = getButtonKey(v)
+            if key then
+                local fails = failedButtons[key] or 0
+                if not existingKeys[key] and fails < 2 and not isGreyedOut(v) and not buyBlacklist[key]
+                   and not (skipDecorActive and _isDecorBtn(v, key)) then
+                    local dist = hrpPos and (v.Position - hrpPos).Magnitude or 999999
+                    tinsert(lq, { btn = v, key = key, dist = dist, fails = fails })
+                    added = added + 1
+                end
             end
         end
-    end
+    end)
     queueLock = false
     return added
 end
@@ -1166,16 +1153,23 @@ local function allButtonsDead()
 end
 
 local function cleanupQueue()
-    while queueLock do task_wait(0.001) end
-    queueLock = true
-    if queueIndex > 20 then
-        local newQueue = {}
-        local lq = localQueue
-        local n = 0
-        for i = queueIndex, #lq do n = n + 1; newQueue[n] = lq[i] end
-        localQueue = newQueue
-        queueIndex = 1
+
+    local waitT = tick_()
+    while queueLock do
+        if (tick_() - waitT) > 1 then queueLock = false; break end
+        task_wait(0.001)
     end
+    queueLock = true
+    pcall_(function()
+        if queueIndex > 20 then
+            local newQueue = {}
+            local lq = localQueue
+            local n = 0
+            for i = queueIndex, #lq do n = n + 1; newQueue[n] = lq[i] end
+            localQueue = newQueue
+            queueIndex = 1
+        end
+    end)
     queueLock = false
 end
 
@@ -1980,17 +1974,17 @@ _wrap("cash-farm", function()
     end
 end)
 
-local statusTx = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 226, 58)})
-local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
-local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
-local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
-local statusTx5 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(222, 210, 170)})
+local statusTx = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(236, 238, 242)})
+local statusTx2 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(196, 198, 206)})
+local statusTx3 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(196, 198, 206)})
+local statusTx4 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(196, 198, 206)})
+local statusTx5 = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(196, 198, 206)})
 local stUI = { lbl = {}, dot = {} }
-stUI.panel = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 10, Rounding = 10, Color = C3rgb(14, 14, 10), Transparency = 0.62, Visible = false, ZIndex = 2})
-stUI.ln = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = false, Thickness = 1, Corner = 10, Rounding = 10, Color = C3rgb(255, 226, 58), Transparency = 0.18, Visible = false, ZIndex = 3})
-stUI.title = D("Text", {Text = "SELL LEMONS", FontSize = 10, Size = 10, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(255, 226, 58), Transparency = 0.7})
+stUI.panel = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 10, Rounding = 10, Color = C3rgb(15, 15, 18), Transparency = 0.5, Visible = false, ZIndex = 2})
+stUI.ln = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = false, Thickness = 1, Corner = 10, Rounding = 10, Color = C3rgb(236, 238, 242), Transparency = 0.18, Visible = false, ZIndex = 3})
+stUI.title = D("Text", {Text = "SELL LEMONS", FontSize = 10, Size = 10, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = true, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(236, 238, 242), Transparency = 0.7})
 for i = 1, 5 do
-    stUI.lbl[i] = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(168, 158, 128)})
+    stUI.lbl[i] = D("Text", {Text = "", FontSize = 13, Size = 13, Font = (Drawing.Fonts.Monospace or Drawing.Fonts.System), Center = false, Outline = true, Visible = false, ZIndex = 5, Color = C3rgb(142, 144, 152)})
     stUI.dot[i] = D("Circle", {Radius = 3, NumSides = 12, Filled = true, Position = Vec2(0, 0), Color = C3rgb(255, 200, 40), Transparency = 1, Visible = false, ZIndex = 4})
 end
 
@@ -2003,13 +1997,13 @@ function S.stLine(valObj, i, fullTxt)
     valObj.Text = val; valObj.Position = Vec2(S.stX + 122, y); valObj.Visible = true
     local up = val:upper()
     if up:find("READY") or up:find("FARMING") or up:find("GO", 1, true) then
-        dt.Color = C3rgb(120, 245, 110)
-        dt.Transparency = 0.55 + 0.4 * math.sin(tick_() * 5)
+        dt.Color = C3rgb(240, 242, 246)
+        dt.Transparency = 0.45 + 0.45 * math.sin(tick_() * 5)
     elseif up:find("PAUSED") or up:find("WAIT") or up:find("IDLE") or up:find("STARTS IN")
         or up:match("^%d+:%d") or up == "--" or up:find("SOON") then
-        dt.Color = C3rgb(150, 140, 110); dt.Transparency = 0.8
+        dt.Color = C3rgb(120, 122, 130); dt.Transparency = 0.82
     else
-        dt.Color = C3rgb(255, 200, 40); dt.Transparency = 0.95
+        dt.Color = C3rgb(200, 202, 210); dt.Transparency = 0.92
     end
     dt.Position = Vec2(S.stX + 16, y + 7); dt.Visible = true
     S.stY = y + 19
@@ -2018,11 +2012,11 @@ function S.stHide(valObj, i)
     valObj.Visible = false; stUI.lbl[i].Visible = false; stUI.dot[i].Visible = false
 end
 
-local rbBarBg = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(24, 24, 20), Transparency = 0.72, Visible = false, ZIndex = 4})
-local rbBarLn = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = false, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(255, 226, 58), Transparency = 0.3, Visible = false, ZIndex = 6})
+local rbBarBg = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(28, 28, 33), Transparency = 0.72, Visible = false, ZIndex = 4})
+local rbBarLn = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = false, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(236, 238, 242), Transparency = 0.3, Visible = false, ZIndex = 6})
 local rbBarSegs = {}
 for _ = 1, 12 do
-    rbBarSegs[#rbBarSegs + 1] = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 2, Rounding = 2, Color = C3rgb(255, 226, 58), Transparency = 1, Visible = false, ZIndex = 5})
+    rbBarSegs[#rbBarSegs + 1] = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 2, Rounding = 2, Color = C3rgb(236, 238, 242), Transparency = 1, Visible = false, ZIndex = 5})
 end
 
 function LSM.findVine()
@@ -2106,6 +2100,41 @@ local function pollInput()
                     S.keyDown[vk] = false
                 end
             end
+        end
+
+        if iskeypressed(0x77) then
+            if not S.keyDown[0x77] then
+                S.keyDown[0x77] = true
+                pcall_(function()
+                    local btns = getButtonsRealTime()
+                    local inQ = {}
+                    for i = queueIndex, #localQueue do
+                        local it = localQueue[i]; if it and it.key then inQ[it.key] = true end
+                    end
+                    local nBl, nG, nF, nQ, nLive = 0, 0, 0, 0, 0
+                    rprint("[DUMP] ===== видимых кнопок: " .. #btns .. " | в очереди: " .. (#localQueue - queueIndex + 1) .. " =====")
+                    for _, v in ipairs_(btns) do
+                        local key = getButtonKey(v)
+                        if key then
+                            local g  = isGreyedOut(v)
+                            local bl = buyBlacklist[key] and true or false
+                            local f  = failedButtons[key] or 0
+                            local q  = inQ[key] and true or false
+                            local nm = "?"; pcall_(function() nm = tostring_(v.Parent and v.Parent.Name) end)
+                            local reason
+                            if bl then reason = "BLACKLIST(уже куплена?)"; nBl = nBl + 1
+                            elseif g then reason = "grey(не по карману)"; nG = nG + 1
+                            elseif f >= 2 then reason = "failed2x"; nF = nF + 1
+                            elseif q then reason = "в очереди"; nQ = nQ + 1
+                            else reason = "ЖИВАЯ - бот ДОЛЖЕН купить"; nLive = nLive + 1 end
+                            rprint("[DUMP] " .. nm .. " @" .. key .. " | " .. reason .. " | fails=" .. f)
+                        end
+                    end
+                    rprint("[DUMP] ИТОГ: blacklist=" .. nBl .. " grey=" .. nG .. " failed=" .. nF .. " вОчереди=" .. nQ .. " ЖИВЫХ=" .. nLive)
+                end)
+            end
+        else
+            S.keyDown[0x77] = false
         end
 
         local mx, my = S.pmx, S.pmy
@@ -2292,7 +2321,7 @@ local function pollInput()
     end
 
     if vReady == true then
-        statusTx3.Color = C3rgb(255, 226, 58)
+        statusTx3.Color = C3rgb(236, 238, 242)
         if not CFG.vineNotif then
             CFG.vineNotif = true
             pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
@@ -2303,13 +2332,13 @@ local function pollInput()
         local t3
         if rem > 0 then
             t3 = sformat("cash vine  |  %d:%02d:%02d", mfloor(rem / 3600), mfloor((rem % 3600) / 60), mfloor(rem % 60))
-            statusTx3.Color = C3rgb(222, 210, 170)
+            statusTx3.Color = C3rgb(196, 198, 206)
         elseif vReady == false then
             t3 = "cash vine  |  soon..."
-            statusTx3.Color = C3rgb(222, 210, 170)
+            statusTx3.Color = C3rgb(196, 198, 206)
         else
             t3 = "cash vine  |  READY"
-            statusTx3.Color = C3rgb(255, 226, 58)
+            statusTx3.Color = C3rgb(236, 238, 242)
             if not CFG.vineNotif then
                 CFG.vineNotif = true
                 pcall_(function() notify("Cash Vine is READY", "Sell Lemons", 4) end)
@@ -2328,14 +2357,14 @@ local function pollInput()
         local t4
         if rem and rem > 0 then
             t4 = sformat("%s  |  %d:%02d", mgName, mfloor(rem / 60), mfloor(rem % 60))
-            statusTx4.Color = C3rgb(222, 210, 170)
+            statusTx4.Color = C3rgb(196, 198, 206)
             MG.miniNotif = false
         elseif not MG.miniEnd then
             t4 = mgName .. "  |  --"
-            statusTx4.Color = C3rgb(222, 210, 170)
+            statusTx4.Color = C3rgb(196, 198, 206)
         else
             t4 = mgName .. "  |  READY"
-            statusTx4.Color = C3rgb(255, 226, 58)
+            statusTx4.Color = C3rgb(236, 238, 242)
             if MG.active and not MG.miniNotif then
                 MG.miniNotif = true
                 pcall_(function() notify(mgName .. " is READY", "Sell Lemons", 4) end)
@@ -2370,7 +2399,7 @@ local function pollInput()
         elseif RB.pct then
             statusTx5.Color = RB.pctColor(RB.pct)
         else
-            statusTx5.Color = C3rgb(222, 210, 170)
+            statusTx5.Color = C3rgb(196, 198, 206)
         end
         S.stLine(statusTx5, 5, "rebirth  |  " .. txt5)
 
@@ -2382,10 +2411,14 @@ local function pollInput()
     end
 
     if S.stY > vy0 + 16 then
-        stUI.title.Position = Vec2(S.stX + 150, vy0 - 1); stUI.title.Visible = true
+        local bt = tick_()
+        stUI.title.Position = Vec2(S.stX + 150, vy0 - 1)
+        stUI.title.Transparency = 0.5 + 0.16 * msin(bt * 1.3)
+        stUI.title.Visible = true
         stUI.panel.Position = Vec2(S.stX, vy0 - 8); stUI.panel.Size = Vec2(300, S.stY - vy0 + 12)
         stUI.panel.Visible = true
         stUI.ln.Position = Vec2(S.stX, vy0 - 8); stUI.ln.Size = Vec2(300, S.stY - vy0 + 12)
+        stUI.ln.Transparency = 0.12 + 0.07 * msin(bt * 1.7)
         stUI.ln.Visible = true
     else
         stUI.title.Visible = false; stUI.panel.Visible = false; stUI.ln.Visible = false
@@ -2838,8 +2871,18 @@ end
 function RB.prepClick()
     RB.busyT = tick_()
 
-    if lemonFarmActive then
+    if lemonFarmActive or LSM.zoomedIn then
+        LSM.zoomedIn = false
         pcall_(function() LSM.zoom(-1) end)
+        local chr = player.Character
+        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+        if type(mousescroll) == "function" and _windowFocused() then
+            for _ = 1, 30 do
+                if _camFirstPerson(hrp) == false then break end
+                pcall_(function() mousescroll(-CFG.zoomStep) end)
+                task_wait(0.02); RB.busyT = tick_()
+            end
+        end
         RB.busyT = tick_()
     end
 end
@@ -2899,6 +2942,21 @@ end
 
 function RB.confirmRebirth(cf)
     if not autoRebirthActive then RB.status = "off"; return end
+
+    pcall_(function()
+        local inset = 0
+        if GuiService then pcall_(function() inset = GuiService:GetGuiInset().Y end) end
+        local c = RB.findConfirm() or cf
+        if c then
+            local nm; pcall_(function() nm = c.Name end)
+            local ap = c.AbsolutePosition; local az = c.AbsoluteSize
+            rprint(sformat("[CONFIRM-DIAG] btn='%s' ap=(%d,%d) size=(%d,%d) RBclick=(%d,%d) inset=%d click+inset_y=%d",
+                tostring_(nm), mfloor(ap.X), mfloor(ap.Y), mfloor(az.X), mfloor(az.Y),
+                mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2), mfloor(inset), mfloor(ap.Y + az.Y / 2 + inset)))
+        else
+            rprint("[CONFIRM-DIAG] findConfirm = nil (кнопок попапа не видно)")
+        end
+    end)
     local function pressConfirm()
         RB.prepClick()
         local c = RB.findConfirm() or cf
@@ -2910,6 +2968,9 @@ function RB.confirmRebirth(cf)
     for i = 1, 2 do
         task_wait(1.2); RB.busyT = tick_()
         local cashNow = RB.cashLog()
+        rprint(sformat("[CONFIRM-DIAG] try=%d cashBefore=%s cashNow=%s popupStill=%s",
+            i, tostring_(cashBefore and mfloor(cashBefore)), tostring_(cashNow and mfloor(cashNow)),
+            tostring_(RB.findConfirm() ~= nil)))
         if cashBefore and cashNow and cashNow < cashBefore - 3 then done = true; break end
         if not RB.findConfirm() then done = true; break end
         if i == 1 then pressConfirm() end
@@ -2972,15 +3033,11 @@ end
 function RB.pctRGB(p)
     p = p or 0
     if p < 0 then p = 0 elseif p > 100 then p = 100 end
-    local r, g, b
-    if p < 50 then
-        local u = p / 50
-        r, g, b = 255, mfloor(120 + u * 80), mfloor(30 + u * 10)
-    else
-        local u = (p - 50) / 50
-        r, g, b = mfloor(255 - u * 165), mfloor(200 + u * 35), mfloor(40 + u * 40)
-    end
-    return r, g, b
+
+    local v = mfloor(108 + (p / 100) * 147)
+    if v > 255 then v = 255 end
+    local b = v + 6; if b > 255 then b = 255 end
+    return v, v, b
 end
 function RB.pctColor(p)
     return C3rgb(RB.pctRGB(p))
@@ -3036,8 +3093,9 @@ function RB.runCheck(g)
 
     if not RB.panelOpen(g) then
         local ok = false
-        for _ = 1, 2 do
+        for att = 1, 2 do
             if not autoRebirthActive then return end
+            RB.status = sformat("opening panel %d/2...", att)
             RB.click(RB.node(RB.gui() or g, "Sidebar/Container/Investors") or sb)
             for _ = 1, 6 do
                 task_wait(0.4); RB.busyT = tick_()
@@ -3616,4 +3674,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v20 loaded  |  by Inspecttor")
+rprint("sell lemons v21 loaded  |  by Inspecttor")
