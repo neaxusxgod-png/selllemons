@@ -76,6 +76,7 @@ local cashFarmActive   = true
 local autoStandActive  = false
 local autoDealActive   = true
 local autoRebirthActive = false
+local keyEspActive      = false
 local _standIsTapping  = false
 
 local buyBlacklist    = {}
@@ -368,6 +369,8 @@ do
         src = src:gsub('line%(titleBarX, titleBarY %+ titleBarH, titleBarX %+ titleBarW, titleBarY %+ titleBarH, Theme%.border, 8%)', '')
 
         src = src:gsub('rect%(titleBarX, titleBarY %+ titleBarH / 2, titleBarW, titleBarH / 2, Theme%.surface2, 7, 0%)', '')
+
+        src = src:gsub('setrobloxinput%(desired%)', 'setrobloxinput(true)')
         loadstring(src)()
     end)
     homesick = _G.homesick
@@ -386,14 +389,32 @@ local function syncToUI()
     pcall_(function() if UIRef.t.AutoStand then UIRef.t.AutoStand:SetValue(autoStandActive) end end)
     pcall_(function() if UIRef.t.CashFarm  then UIRef.t.CashFarm:SetValue(cashFarmActive)   end end)
     pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:SetValue(autoRebirthActive) end end)
+    pcall_(function() if UIRef.t.AutoDeal  then UIRef.t.AutoDeal:SetValue(autoDealActive)   end end)
 end
-local function stopAll()
 
-    autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive, autoRebirthActive = false, false, false, false, false
-    resetBuyBlacklist()
-    syncToUI()
+local function stopAll(save)
+    if save == nil then save = (S.stopSaved == nil) end
+    if save then
+        S.stopSaved = {
+            ab = autoBuyActive, lf = lemonFarmActive, cf = cashFarmActive,
+            as = autoStandActive, ar = autoRebirthActive, ad = autoDealActive,
+        }
+        autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive, autoRebirthActive = false, false, false, false, false
+        autoDealActive = false
+        resetBuyBlacklist()
+        syncToUI()
+        print("[Hub] Stop All ON - всё остановлено (состояние сохранено)")
+    else
+        local s = S.stopSaved
+        if s then
+            autoBuyActive, lemonFarmActive, cashFarmActive = s.ab, s.lf, s.cf
+            autoStandActive, autoRebirthActive, autoDealActive = s.as, s.ar, s.ad
+            S.stopSaved = nil
+        end
+        syncToUI()
+        print("[Hub] Stop All OFF - фичи возвращены")
+    end
     pcall_(function() if S.saveState then S.saveState() end end)
-    print("[Hub] Everything stopped!")
 end
 
 local function toggleFeature(slot)
@@ -721,22 +742,18 @@ if homesick then
     end):addKeybind("5", "Toggle", true, function() end)
     pcall_(function()
 
-        UIRef.t.RebirthMult = left:addSlider("rebirthPct", "Rebirth at +%", 1, 100, 25, function(val)
-            local m = mfloor(tonumber_(val) or 25)
-            if m < 1 then m = 1 elseif m > 100 then m = 100 end
+        RB.thBoost = 1
+        local _rbS = left.rawSec:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
+            local m = tonumber_(val) or 25
+            if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end
             RB.gainPct = m
         end)
-
-        UIRef.t.RebirthBoost = left:addSlider("rebirthBoost", "Threshold x", 1, 100, 1, function(val)
-            local m = mfloor(tonumber_(val) or 1)
-            if m < 1 then m = 1 elseif m > 100 then m = 100 end
-            RB.thBoost = m
-        end)
+        pcall_(function() _rbS.item.id = "rebirthThreshold" end)
     end)
 
     local right = tab1:addSection("Control", "Left")
 
-    pcall_(function() window:setBadge("Sell Lemons v21  |  by Inspecttor") end)
+    pcall_(function() window:setBadge("Sell Lemons v22  |  by Inspecttor") end)
     UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
         autoDealActive = val
         S.saveState()
@@ -757,6 +774,11 @@ if homesick then
         end
     end)
 
+    UIRef.t.KeyEsp = right:addToggle("keyEsp", "Key/Lever ESP", false, function(val)
+        keyEspActive = val
+        S.saveState()
+    end)
+
     pcall_(function() right:addSeparator() end)
 
     UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
@@ -765,18 +787,18 @@ if homesick then
     end)
 
     UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
+
         if val then
-            stopAll()
-            task.delay(0.1, function()
-                pcall_(function() UIRef.t.StopAll:SetValue(false) end)
-            end)
+            S.stopSavedMini = MG.active
+            MG.active = false
+            pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:SetValue(false) end end)
+            stopAll(true)
+        else
+            if S.stopSavedMini ~= nil then MG.active = S.stopSavedMini; S.stopSavedMini = nil end
+            pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:SetValue(MG.active) end end)
+            stopAll(false)
         end
-    end):addKeybind("6", "Toggle", true, function()
-        stopAll()
-        task.delay(0.1, function()
-            pcall_(function() UIRef.t.StopAll:SetValue(false) end)
-        end)
-    end)
+    end):addKeybind("6", "Toggle", true, function() end)
 
     pcall_(function() right:addSeparator() end)
 
@@ -1220,7 +1242,7 @@ local function _anyBuyableNowButtons()
     return _anyLiveButtons()
 end
 local function _autobuyHasWork() return (#localQueue - queueIndex + 1) > 0 end
-local STAND_E_SPAM_DURATION = 1.5
+local STAND_E_SPAM_DURATION = 3.0
 
 local function runLocationsPass(firstRun)
     local locs = getStandLocations()
@@ -2019,6 +2041,135 @@ for _ = 1, 12 do
     rbBarSegs[#rbBarSegs + 1] = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 2, Rounding = 2, Color = C3rgb(236, 238, 242), Transparency = 1, Visible = false, ZIndex = 5})
 end
 
+local ESP = { keys = {
+    { path = {"Map", "Sewer", "CashVine", "VineKey"},      name = "VINE KEY",     rgb = {110, 245, 180} },
+    { path = {"Map", "Sewer", "SewerAlien", "UFOKey"},     name = "UFO KEY",      rgb = {170, 130, 255} },
+    { path = {"Map", "Sewer", "DoorsRed",    "Lever (Red)",    "Root", "Lever"}, name = "RED LEVER",    rgb = {255, 95,  95}  },
+    { path = {"Map", "Sewer", "DoorsPurple", "Lever (Purple)", "Root", "Lever"}, name = "PURPLE LEVER", rgb = {200, 120, 255} },
+    { path = {"Map", "Sewer", "DoorsGreen",  "Lever (Green)",  "Root", "Lever"}, name = "GREEN LEVER",  rgb = {120, 255, 130} },
+    { path = {"Map", "Sewer", "DoorsBlue",   "Lever (Blue)",   "Root", "Lever"}, name = "BLUE LEVER",   rgb = {90,  175, 255} },
+} }
+local _espFont = (Drawing.Fonts and (Drawing.Fonts.Monospace or Drawing.Fonts.System)) or nil
+for i = 1, #ESP.keys do
+    local k = ESP.keys[i]
+    local col = C3rgb(k.rgb[1], k.rgb[2], k.rgb[3])
+    k.glow  = D("Square", {Filled = false, Thickness = 4, Corner = 5, Rounding = 5, Size = Vec2(0, 0), Position = Vec2(0, 0), Color = col, Transparency = 0, Visible = false, ZIndex = 6})
+    k.box   = D("Square", {Filled = false, Thickness = 2, Corner = 4, Rounding = 4, Size = Vec2(0, 0), Position = Vec2(0, 0), Color = col, Transparency = 0, Visible = false, ZIndex = 8})
+    k.label = D("Text",   {Text = "", FontSize = 14, Size = 14, Font = _espFont, Center = true, Outline = true, OutlineColor = C3rgb(0, 0, 0), Color = col, Transparency = 0, Visible = false, ZIndex = 9})
+end
+local function _espHide(k)
+    k.glow.Visible = false; k.box.Visible = false; k.label.Visible = false
+end
+
+local function _espGather(k)
+    local ps = {}
+    pcall_(function()
+        local function consider(d)
+            if not d then return end
+            local sz; pcall_(function() sz = d.Size end)
+            if sz == nil then return end
+            local okv = pcall_(function() return sz.X + sz.Y + sz.Z end)
+            if not okv then return end
+            local tr = 0; pcall_(function() tr = d.Transparency end)
+            if (tr or 0) >= 1 then return end
+            ps[#ps + 1] = {p = d, hx = sz.X / 2, hy = sz.Y / 2, hz = sz.Z / 2}
+        end
+        consider(k.ref)
+        for _, d in ipairs_(k.ref:GetDescendants()) do consider(d) end
+    end)
+    if #ps == 0 then
+        pcall_(function() local sz = k.ref.Size; if sz then ps[1] = {p = k.ref, hx = sz.X / 2, hy = sz.Y / 2, hz = sz.Z / 2} end end)
+    end
+    k.parts = ps
+    if DEBUG then rprint("[ESP] " .. tostring_(k.name) .. ": видимых партов=" .. #ps) end
+end
+function ESP.update()
+    if not keyEspActive then
+        for i = 1, #ESP.keys do _espHide(ESP.keys[i]) end
+        return
+    end
+    if CFG.slow then local n = tick_(); if (n - (ESP.throt or 0)) < 0.016 then return end; ESP.throt = n end
+    local vp; pcall_(function() vp = camera.ViewportSize end)
+    if not vp then return end
+    local chr = player.Character
+    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+    local hp; pcall_(function() hp = hrp and hrp.Position end)
+    for i = 1, #ESP.keys do
+        local k = ESP.keys[i]
+        if not (k.ref and k.ref.Parent) and (tick_() - (k.refT or 0) > 0.5) then
+            k.refT = tick_()
+            local cur = Workspace
+            pcall_(function() for _, seg in ipairs_(k.path) do cur = cur and cur:FindFirstChild(seg) end end)
+            k.ref = cur; k.parts = nil
+        end
+        if k.ref and not k.parts then _espGather(k) end
+        if k.parts and #k.parts > 0 then
+            local cpos, live = nil, 0
+            pcall_(function()
+                for pi = 1, #k.parts do
+                    local e = k.parts[pi]
+                    if e.p and e.p.Parent then live = live + 1; if not cpos then cpos = e.p.Position end end
+                end
+            end)
+            if live == 0 then
+                k.parts = nil; _espHide(k)
+            else
+                local csp, con; pcall_(function() csp, con = WorldToScreen(cpos) end)
+
+                local centerOn = csp and con and csp.X >= 0 and csp.X <= vp.X and csp.Y >= 0 and csp.Y <= vp.Y
+                if centerOn then
+                    local minX, minY, maxX, maxY, nOn = 1e9, 1e9, -1e9, -1e9, 0
+                    pcall_(function()
+                        for pi = 1, #k.parts do
+                            local e = k.parts[pi]
+                            if e.p and e.p.Parent then
+                                local pp = e.p.Position
+                                for ox = -1, 1, 2 do
+                                    for oy = -1, 1, 2 do
+                                        for oz = -1, 1, 2 do
+                                            local sp, on = WorldToScreen(Vec3(pp.X + ox * e.hx, pp.Y + oy * e.hy, pp.Z + oz * e.hz))
+                                            if sp and on then
+                                                nOn = nOn + 1
+                                                if sp.X < minX then minX = sp.X end
+                                                if sp.X > maxX then maxX = sp.X end
+                                                if sp.Y < minY then minY = sp.Y end
+                                                if sp.Y > maxY then maxY = sp.Y end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    if nOn > 0 and maxX > minX then
+
+                        if minX < 0 then minX = 0 end
+                        if minY < 0 then minY = 0 end
+                        if maxX > vp.X then maxX = vp.X end
+                        if maxY > vp.Y then maxY = vp.Y end
+                        local x0, y0, x1, y1 = minX, minY, maxX, maxY
+                        if x1 - x0 < 10 then local c = (x0 + x1) / 2; x0 = c - 5; x1 = c + 5 end
+                        if y1 - y0 < 10 then local c = (y0 + y1) / 2; y0 = c - 5; y1 = c + 5 end
+                        local w, h = x1 - x0, y1 - y0
+                        local breath = 0.5 + 0.5 * msin(tick_() * 2.0)
+                        k.glow.Position = Vec2(x0 - 2, y0 - 2); k.glow.Size = Vec2(w + 4, h + 4); k.glow.Transparency = 0.14 + 0.12 * breath; k.glow.Visible = true
+                        k.box.Position  = Vec2(x0, y0);         k.box.Size  = Vec2(w, h);         k.box.Transparency = 1;                    k.box.Visible = true
+                        local dist = hp and mfloor((cpos - hp).Magnitude) or 0
+                        k.label.Text = k.name .. "   " .. dist .. "m"
+                        k.label.Position = Vec2((x0 + x1) / 2, y0 - 18); k.label.Transparency = 1; k.label.Visible = true
+                    else
+                        _espHide(k)
+                    end
+                else
+                    _espHide(k)
+                end
+            end
+        else
+            _espHide(k)
+        end
+    end
+end
+
 function LSM.findVine()
     local c = LSM.vineRef
     if c and c.Parent then return c end
@@ -2427,6 +2578,7 @@ end
 
 RunService.RenderStepped:Connect(function()
     if not ScriptActive then return end
+    pcall_(ESP.update)
     local ok, err = pcall_(pollInput)
     if not ok then reportErr("ui-input", err) end
 end)
@@ -2892,13 +3044,19 @@ function RB.click(node)
     pcall_(function() ap = node.AbsolutePosition; az = node.AbsoluteSize end)
     if not ap or not az then return false end
     if ap.X <= 1 and ap.Y <= 1 then return false end
-    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2)
+
+    local inset = 0
+    pcall_(function() if GuiService then inset = GuiService:GetGuiInset().Y end end)
+    local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2 + inset)
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     RB.busyT = tick_(); LSM.lastBot = tick_()
     pcall_(function()
-        mousemoveabs(cx, cy); task_wait()
-        mouse1press(); task_wait(); mouse1release(); task_wait()
+
+        mousemoveabs(cx - 4, cy); task_wait(0.03)
+        mousemoveabs(cx, cy); RB.busyT = tick_(); task_wait(0.14)
+        mouse1press(); RB.busyT = tick_(); task_wait(0.28)
+        mouse1release(); task_wait(0.1)
         if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
     end)
     return true
@@ -3242,7 +3400,7 @@ function RB.tick()
         if fire and (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then RB.wantSlot = true end
         RB.status = "waiting: auto stand"; return
     end
-    if (not fire) or (now - (RB.lastPeek or 0)) < (RB.peekEvery or 60) then
+    if (not fire) or ((now - (RB.lastPeek or 0)) < (fire and 3 or (RB.peekEvery or 60))) then
 
         local g = RB.gui()
         if g and (RB.panelOpen(g) or RB.findConfirm()) then RB.ensureClosed(g) end
@@ -3674,4 +3832,4 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v21 loaded  |  by Inspecttor")
+rprint("sell lemons v22 loaded  |  by Inspecttor")
