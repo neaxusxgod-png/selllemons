@@ -1872,6 +1872,8 @@ _wrap("lemon-farm", function()
         local rbBusy = (tick_() - (RB.busyT or 0)) < 4 and (tick_() - (RB.checkStartT or 0)) < 30
         local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or rbBusy or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4
 
+        if standBusy then LSM.wasBusy = true elseif LSM.wasBusy then LSM.wasBusy = false; LSM.zoomInT = 0 end
+
         if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
 
             if not LSM.zoomedIn or (tick_() - (LSM.zoomInT or 0)) >= 3 then
@@ -1902,6 +1904,12 @@ _wrap("lemon-farm", function()
                 pcall_(function()
                     if hA then
                         camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
+                    end
+                end)
+
+                pcall_(function()
+                    if type(mousemoverel) == "function" and _windowFocused() and _camFirstPerson(hA) ~= false then
+                        for _ = 1, 6 do mousemoverel(0, -250); LSM.lastBot = tick_(); task_wait(0.02) end
                     end
                 end)
             end
@@ -3796,7 +3804,7 @@ _wrap("auto-stand", function()
         local res = runLocationsPass(firstRun)
         firstRun = false
 
-        LSM.standBusyT = 0
+        LSM.standBusyT = 0; LSM.zoomInT = 0
         if res == "off" then
             task_wait(0.05)
             continue
