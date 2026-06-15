@@ -371,6 +371,7 @@ do
         src = src:gsub('rect%(titleBarX, titleBarY %+ titleBarH / 2, titleBarW, titleBarH / 2, Theme%.surface2, 7, 0%)', '')
 
         src = src:gsub('setrobloxinput%(desired%)', 'setrobloxinput(true)')
+        src = src:gsub('local menuKey = "p"', 'local menuKey = nil')
         loadstring(src)()
     end)
     homesick = _G.homesick
@@ -735,7 +736,7 @@ if homesick then
 
             RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
         else
-            RB.go = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil
+            RB.go = false; RB.wantSlot = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil
             RB.goN = 0; RB.needCur = false
         end
         print("[Hub] toggle AutoRebirth = " .. tostring_(val))
@@ -1143,8 +1144,7 @@ local function appendNewButtons()
         for _, v in ipairs_(buttons) do
             local key = getButtonKey(v)
             if key then
-                local fails = failedButtons[key] or 0
-                if not existingKeys[key] and fails < 2 and not isGreyedOut(v) and not buyBlacklist[key]
+                if not existingKeys[key] and buyReady(key, v) and not isGreyedOut(v) and not buyBlacklist[key]
                    and not (skipDecorActive and _isDecorBtn(v, key)) then
                     local dist = hrpPos and (v.Position - hrpPos).Magnitude or 999999
                     tinsert(lq, { btn = v, key = key, dist = dist, fails = fails })
@@ -1165,8 +1165,7 @@ local function allButtonsDead()
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
-            local fails = failedButtons[key] or 0
-            if fails < 2 and not buyBlacklist[key] and not isGreyedOut(v)
+            if buyReady(key, v) and not buyBlacklist[key] and not isGreyedOut(v)
                and not (skipDecorActive and _isDecorBtn(v, key)) then dead = false; break end
         end
     end
@@ -1227,8 +1226,7 @@ local function _anyLiveButtons()
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
-            local fails = failedButtons[key] or 0
-            if fails < 2 and not buyBlacklist[key] and not isGreyedOut(v)
+            if buyReady(key, v) and not buyBlacklist[key] and not isGreyedOut(v)
                and not (skipDecorActive and _isDecorBtn(v, key)) then live = true; break end
         end
     end
@@ -1321,8 +1319,7 @@ _wrap("autobuy-worker", function()
             queueIndex = queueIndex + 1
             if candidate and candidate.btn and candidate.btn.Parent then
                 local key = candidate.key
-                local fails = failedButtons[key] or 0
-                if fails < 2 and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
+                if buyReady(key, candidate.btn) and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
                    and not (skipDecorActive and _isDecorBtn(candidate.btn, key)) then
                     item = candidate; break
                 end
@@ -1340,8 +1337,7 @@ _wrap("autobuy-worker", function()
                         queueIndex = queueIndex + 1
                         if candidate and candidate.btn and candidate.btn.Parent then
                             local key = candidate.key
-                            local fails = failedButtons[key] or 0
-                            if fails < 2 and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
+                            if buyReady(key, candidate.btn) and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
                                and not (skipDecorActive and _isDecorBtn(candidate.btn, key)) then
                                 item = candidate; break
                             end
@@ -1356,7 +1352,7 @@ _wrap("autobuy-worker", function()
             LSM.buySweepT = 0
             if allButtonsDead() then
                 local now = tick_()
-                if now - lastResetTime > 2 then
+                if now - lastResetTime > 10 then
                     lastResetTime = now
                     resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
                 end
@@ -1383,11 +1379,11 @@ _wrap("autobuy-worker", function()
         local stillExists = false
         pcall_(function() stillExists = btn and btn.Parent and btn:IsDescendantOf(myTycoon) end)
         if stillExists then
-            local nf = (failedButtons[key] or 0) + 1
-            failedButtons[key] = nf
+            markBuyFail(key, btn)
             totalFailed = totalFailed + 1
         else
             buyBlacklist[key]  = true
+            buyAttempt[key]    = nil
             failedButtons[key] = nil
             totalBought = totalBought + 1
             print("[Buy] " .. key .. " | Total: " .. totalBought)
@@ -1419,7 +1415,7 @@ _wrap("autobuy-coord", function()
                 task_wait(0.05)
             elseif allButtonsDead() then
                 local now = tick_()
-                if now - lastResetTime > 2 then
+                if now - lastResetTime > 10 then
                     lastResetTime = now
                     resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
                     task_wait(0.05)
@@ -1427,6 +1423,10 @@ _wrap("autobuy-coord", function()
                     task_wait(0.5)
                 end
             else
+                if tick_() - lastResetTime > 60 then
+                    lastResetTime = tick_()
+                    resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
+                end
                 task_wait(0.3)
             end
             continue
@@ -2277,7 +2277,7 @@ local function pollInput()
                         if key then
                             local g  = isGreyedOut(v)
                             local bl = buyBlacklist[key] and true or false
-                            local f  = failedButtons[key] or 0
+                            local f  = (buyAttempt[key] and buyAttempt[key].n) or 0
                             local q  = inQ[key] and true or false
                             local nm = "?"; pcall_(function() nm = tostring_(v.Parent and v.Parent.Name) end)
                             local reason
@@ -3825,6 +3825,31 @@ _wrap("auto-stand", function()
             LSM.standNextT = t0 + rest
             if (tick_() - t0) >= rest then break end
             task_wait(0.25)
+        end
+    end
+end)
+
+_wrap("cancel-prompt", function()
+    while ScriptActive do
+        task_wait(0.25)
+        local cancel
+        pcall_(function()
+            local pg = getPlayerGui()
+            local pr = pg and pg:FindFirstChild("Prompt")
+            local cl = pr and pr:FindFirstChild("ChangeLabel")
+            local bt = cl and cl:FindFirstChild("Buttons")
+            cancel = bt and bt:FindFirstChild("Cancel")
+        end)
+        if cancel and _windowFocused() and (tick_() - (S.cancelT or 0)) > 1.5 then
+            local ap, az, vp
+            pcall_(function() ap = cancel.AbsolutePosition; az = cancel.AbsoluteSize; vp = camera.ViewportSize end)
+            if ap and az and vp and az.X > 10
+               and ap.X > 1 and ap.X < vp.X and ap.Y > 1 and ap.Y < vp.Y then
+                S.cancelT = tick_()
+                RB.busyT = tick_(); LSM.lastBot = tick_()
+                pcall_(function() RB.click(cancel) end)
+                rprint("[CancelPrompt] ChangeLabel -> Cancel")
+            end
         end
     end
 end)
