@@ -665,6 +665,7 @@ if Lib then
         size = Vec2(580, 542),
         badge = "v22",
         menuKey = "q",
+        gameInput = "always",   -- never grab game input: menu is click-through, so a VM Restart can't leave the game frozen
         logo = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f34b.png",
     })
     UIRef.win = window
