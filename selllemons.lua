@@ -345,39 +345,14 @@ function FX.restore()
     end)
 end
 
-local homesick
+local Lib
 do
     local ok, err = pcall_(function()
-        local src = game:HttpGet("https://raw.githubusercontent.com/sharedechoes/Matcha-Luas/refs/heads/main/homesick.lua")
-
-        src = src:gsub('accent = c3%(232, 208, 162%),', 'accent = c3(236, 238, 242),')
-        src = src:gsub('bg = c3%(36, 33, 31%),', 'bg = c3(15, 15, 18),')
-        src = src:gsub('surface = c3%(30, 27, 25%),', 'surface = c3(22, 22, 26),')
-        src = src:gsub('surface2 = c3%(44, 40, 37%),', 'surface2 = c3(32, 32, 37),')
-        src = src:gsub('surface3 = c3%(54, 50, 46%),', 'surface3 = c3(45, 45, 51),')
-        src = src:gsub('border = c3%(60, 55, 52%),', 'border = c3(66, 66, 73),')
-        src = src:gsub('sub = c3%(150, 142, 135%),', 'sub = c3(150, 152, 160),')
-        src = src:gsub('%(ProjectState%.badgeText %.%. " | v1%.4%.0"%)', '(ProjectState.badgeText)')
-        src = src:gsub('or "v1%.4%.0"', 'or ""')
-
-        src = src:gsub('bg = 1%.0,', 'bg = 0.52,')
-        src = src:gsub('surface = 1%.0,', 'surface = 0.58,')
-        src = src:gsub('surface2 = 1%.0,', 'surface2 = 0.66,')
-        src = src:gsub('surface3 = 1%.0,', 'surface3 = 0.74,')
-        src = src:gsub('border = 1%.0,', 'border = 0.85,')
-
-        src = src:gsub('line%(titleBarX, titleBarY %+ titleBarH, titleBarX %+ titleBarW, titleBarY %+ titleBarH, Theme%.border, 8%)', '')
-
-        src = src:gsub('rect%(titleBarX, titleBarY %+ titleBarH / 2, titleBarW, titleBarH / 2, Theme%.surface2, 7, 0%)', '')
-
-        src = src:gsub('setrobloxinput%(desired%)', 'setrobloxinput(true)')
-        src = src:gsub('local menuKey = "p"', 'local menuKey = nil')
-        loadstring(src)()
+        Lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.lua"))()
     end)
-    homesick = _G.homesick
-    if not homesick then pcall_(function() homesick = shared.homesick end) end
-    if not homesick then
-        print("[Hub] homesick UI не загрузился (" .. tostring(err) .. ") — клавиши 1-5 работают как фоллбэк")
+    if type(Lib) ~= "table" then pcall_(function() Lib = INSui end) end
+    if not Lib then
+        print("[Hub] INS ui ne zagruzilsya (" .. tostring(err) .. ") - klavishi 1-5 rabotayut kak follbek")
     end
 end
 
@@ -385,12 +360,12 @@ local UIRef = { win = nil, t = {} }
 
 local function syncFromUI() end
 local function syncToUI()
-    pcall_(function() if UIRef.t.AutoBuy   then UIRef.t.AutoBuy:SetValue(autoBuyActive)     end end)
-    pcall_(function() if UIRef.t.LemonFarm then UIRef.t.LemonFarm:SetValue(lemonFarmActive) end end)
-    pcall_(function() if UIRef.t.AutoStand then UIRef.t.AutoStand:SetValue(autoStandActive) end end)
-    pcall_(function() if UIRef.t.CashFarm  then UIRef.t.CashFarm:SetValue(cashFarmActive)   end end)
-    pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:SetValue(autoRebirthActive) end end)
-    pcall_(function() if UIRef.t.AutoDeal  then UIRef.t.AutoDeal:SetValue(autoDealActive)   end end)
+    pcall_(function() if UIRef.t.AutoBuy   then UIRef.t.AutoBuy:Set(autoBuyActive)     end end)
+    pcall_(function() if UIRef.t.LemonFarm then UIRef.t.LemonFarm:Set(lemonFarmActive) end end)
+    pcall_(function() if UIRef.t.AutoStand then UIRef.t.AutoStand:Set(autoStandActive) end end)
+    pcall_(function() if UIRef.t.CashFarm  then UIRef.t.CashFarm:Set(cashFarmActive)   end end)
+    pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:Set(autoRebirthActive) end end)
+    pcall_(function() if UIRef.t.AutoDeal  then UIRef.t.AutoDeal:Set(autoDealActive)   end end)
 end
 
 local function stopAll(save)
@@ -677,180 +652,139 @@ local function getBuyLocations()
     return out
 end
 
-if homesick then
-    pcall_(function() homesick.changelogEnabled = false end)
-    local window = homesick.createWindow("Sell Lemons", 480, 520)
-
+if Lib then
+    Lib:ApplyThemePreset("Waifu")
+    local window = Lib:CreateWindow({
+        title = "Sell Lemons",
+        subtitle = "by Inspecttor",
+        size = Vec2(580, 542),
+        badge = "v22",
+        menuKey = "q",
+        logo = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f34b.png",
+    })
     UIRef.win = window
 
-    local tab1 = window:addTab("Features")
+    local tab1 = window:Tab("Features", "gauge")
+    local left = tab1:Section("Farming", "Left")
 
-    local left = tab1:addSection("Farming", "Right")
-
-    UIRef.t.AutoBuy = left:addToggle("autoBuy", "Auto Buy", false, function(val)
+    UIRef.t.AutoBuy = left:Toggle("Auto Buy", false, function(val)
         autoBuyActive = val
-
         if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
         else pcall_(function() localQueue = {}; queueIndex = 1 end) end
         S.saveState()
-        print("[Hub] toggle AutoBuy = " .. tostring_(val))
-    end):addKeybind("1", "Toggle", true, function() end)
+    end):AddKeybind("1", "Toggle")
 
-    UIRef.t.SkipDecor = left:addToggle("skipDecor", "Skip Decor (Auto Buy)", false, function(val)
-        skipDecorActive = val
-        S.saveState()
-        print("[Hub] toggle SkipDecor = " .. tostring_(val))
+    UIRef.t.SkipDecor = left:Toggle("Skip Decor", false, function(val)
+        skipDecorActive = val; S.saveState()
+    end):Tooltip("skip decoration buttons while auto-buying")
+
+    left:Divider()
+
+    UIRef.t.LemonFarm = left:Toggle("Lemon Farm", false, function(val)
+        lemonFarmActive = val; S.saveState()
+    end):AddKeybind("2", "Toggle")
+
+    UIRef.t.AfkDelay = left:Slider("AFK delay", CFG.afkDelay or 6, 1, 1, 30, "s", function(val)
+        local s = mfloor(tonumber_(val) or 6); if s < 1 then s = 1 elseif s > 30 then s = 30 end; CFG.afkDelay = s
     end)
 
-    pcall_(function() left:addSeparator() end)
+    UIRef.t.AutoStand = left:Toggle("Auto Stand", false, function(val)
+        autoStandActive = val; S.saveState()
+    end):AddKeybind("3", "Toggle")
 
-    UIRef.t.LemonFarm = left:addToggle("lemonFarm", "Lemon Farm", false, function(val)
-        lemonFarmActive = val
-        S.saveState()
-        print("[Hub] toggle LemonFarm = " .. tostring_(val))
-    end):addKeybind("2", "Toggle", true, function() end)
+    UIRef.t.CashFarm = left:Toggle("Cash Bags Farm", true, function(val)
+        cashFarmActive = val; S.saveState()
+    end):AddKeybind("4", "Toggle")
 
-    pcall_(function()
-        UIRef.t.AfkDelay = left:addSlider("afkDelay", "AFK delay", 1, 30, CFG.afkDelay or 6, function(val)
-            local s = mfloor(tonumber_(val) or 6)
-            if s < 1 then s = 1 elseif s > 30 then s = 30 end
-            CFG.afkDelay = s
-        end)
-    end)
+    left:Divider("Rebirth")
 
-    UIRef.t.AutoStand = left:addToggle("autoStand", "Auto Stand", false, function(val)
-        autoStandActive = val
-        S.saveState()
-        print("[Hub] toggle AutoStand = " .. tostring_(val))
-    end):addKeybind("3", "Toggle", true, function() end)
-
-    UIRef.t.CashFarm = left:addToggle("cashFarm", "Cash Bags Farm", true, function(val)
-        cashFarmActive = val
-        S.saveState()
-        print("[Hub] toggle CashFarm = " .. tostring_(val))
-    end):addKeybind("4", "Toggle", true, function() end)
-
-    UIRef.t.AutoRebirth = left:addToggle("autoRebirth", "Auto Rebirth", false, function(val)
+    UIRef.t.AutoRebirth = left:Toggle("Auto Rebirth", false, function(val)
         autoRebirthActive = val
         if val then
-
             RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
         else
-            RB.go = false; RB.wantSlot = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil
-            RB.goN = 0; RB.needCur = false
+            RB.go = false; RB.wantSlot = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil; RB.goN = 0; RB.needCur = false
         end
-        print("[Hub] toggle AutoRebirth = " .. tostring_(val))
-    end):addKeybind("5", "Toggle", true, function() end)
-    pcall_(function()
+    end):AddKeybind("5", "Toggle")
 
-        RB.thBoost = 1
-        local _rbS = left.rawSec:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
-            local m = tonumber_(val) or 25
-            if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end
-            RB.gainPct = m
-        end)
-        pcall_(function() _rbS.item.id = "rebirthThreshold" end)
+    RB.thBoost = 1
+    left:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
+        local m = tonumber_(val) or 25; if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end; RB.gainPct = m
     end)
 
-    local right = tab1:addSection("Control", "Left")
+    local right = tab1:Section("Control", "Right")
 
-    pcall_(function() window:setBadge("Sell Lemons v22  |  by Inspecttor") end)
-    UIRef.t.AutoDeal = right:addToggle("autoDeal", "Auto Deal", true, function(val)
-        autoDealActive = val
-        S.saveState()
+    UIRef.t.AutoDeal = right:Toggle("Auto Deal", true, function(val)
+        autoDealActive = val; S.saveState()
     end)
 
-    UIRef.t.AutoMini = right:addToggle("autoMini", "Auto Minigame", false, function(val)
-        MG.active = val
-        if not val then MG.sessPost = 0 end
-        S.saveState()
-        print("[Hub] toggle AutoMinigame = " .. tostring_(val))
+    UIRef.t.AutoMini = right:Toggle("Auto Minigame", false, function(val)
+        MG.active = val; if not val then MG.sessPost = 0 end; S.saveState()
     end)
 
-    UIRef.t.CashVine = right:addToggle("cashVine", "Cash Vine TP", false, function(val)
-        if val then
-            CFG.vineGo = true
-        else
-            CFG.vineBack = true
-        end
+    UIRef.t.CashVine = right:Toggle("Cash Vine TP", false, function(val)
+        if val then CFG.vineGo = true else CFG.vineBack = true end
     end)
 
-    UIRef.t.KeyEsp = right:addToggle("keyEsp", "Key/Lever ESP", false, function(val)
-        keyEspActive = val
-        S.saveState()
+    UIRef.t.KeyEsp = right:Toggle("Key / Lever ESP", false, function(val)
+        keyEspActive = val; S.saveState()
     end)
 
-    pcall_(function() right:addSeparator() end)
+    right:Divider("System")
 
-    UIRef.t.FpsSave = right:addToggle("fpsSave", "FPS Save (weak PC)", false, function(val)
+    UIRef.t.FpsSave = right:Toggle("FPS Save", false, function(val)
         CFG.slow = val and true or false
         if val then FX.apply() else FX.restore() end
-    end)
+    end):Tooltip("strip graphics for weak PCs")
 
-    UIRef.t.StopAll = right:addToggle("stopAll", "Stop All", false, function(val)
-
+    UIRef.t.StopAll = right:Toggle("Stop All", false, function(val)
         if val then
-            S.stopSavedMini = MG.active
-            MG.active = false
-            pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:SetValue(false) end end)
+            S.stopSavedMini = MG.active; MG.active = false
+            pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:Set(false) end end)
             stopAll(true)
         else
             if S.stopSavedMini ~= nil then MG.active = S.stopSavedMini; S.stopSavedMini = nil end
-            pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:SetValue(MG.active) end end)
+            pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:Set(MG.active) end end)
             stopAll(false)
         end
-    end):addKeybind("6", "Toggle", true, function() end)
-
-    pcall_(function() right:addSeparator() end)
-
-    UIRef.t.MenuToggle = right:addToggle("menuToggle", "Menu keybind", true, function(val)
-        pcall_(function()
-            if UIRef.win then
-                UIRef.win.visible = val and true or false
-                if UIRef.win.render then UIRef.win:render() end
-            end
-        end)
-    end):addKeybind("q", "Toggle", true, function() end)
+    end):AddKeybind("6", "Toggle"):SetRisk()
 
     UIRef.standCb = {}
     UIRef.miniCb = {}
     pcall_(function()
-        local autoTab = window:addTab("Stands & Games")
-        local sec = autoTab:addSection("Stands", "Left")
+        local autoTab = window:Tab("Stands & Games", "gamepad")
+        local sec = autoTab:Section("Stands", "Left")
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
         if #listed == 0 then listed = STAND_NAMES end
         for idx, nm in ipairs_(listed) do
             if standEnabled[nm] == nil then standEnabled[nm] = true end
-
-            UIRef.standCb[nm] = sec:addCheckbox("stand_" .. nm, idx .. ". " .. nm, true, function(val)
-                standEnabled[nm] = val
-                S.saveState()
+            UIRef.standCb[nm] = sec:Toggle(idx .. ". " .. nm, true, function(val)
+                standEnabled[nm] = val; S.saveState()
             end)
         end
 
         local mgList = MG.list()
         if #mgList > 0 then
-            local mgSec = autoTab:addSection("Minigames", "Right")
+            local mgSec = autoTab:Section("Minigames", "Right")
             for _, nm in ipairs_(mgList) do
                 local soon = nm:lower():find("trade") and true or false
                 if soon then
                     MG.enabled[nm] = false
-                    mgSec:addCheckbox("mini_" .. nm, nm .. " (soon)", false, function() end)
+                    mgSec:Toggle(nm .. " (soon)", false, function() end)
                 else
                     if MG.enabled[nm] == nil then MG.enabled[nm] = true end
-                    UIRef.miniCb[nm] = mgSec:addCheckbox("mini_" .. nm, nm, true, function(val)
-                        MG.enabled[nm] = val
-                        S.saveState()
+                    UIRef.miniCb[nm] = mgSec:Toggle(nm, true, function(val)
+                        MG.enabled[nm] = val; S.saveState()
                     end)
                 end
             end
         end
     end)
 
-    window.visible = true
-    window:render()
-    print("[Hub] homesick UI loaded - keys 1-5 via keybinds")
+    window:AddSettingsTab("cog")
+    Lib:Notify("Sell Lemons", "v22  -  Q to toggle  -  by Inspecttor", 5)
+    print("[Hub] INS ui loaded")
 end
 
 local function normalizeColor(c)
@@ -3858,7 +3792,7 @@ _G.MatchaCleanup = function()
     pcall_(LSM.returnHome)
     pcall_(FX.restore)
     ScriptActive = false
-    pcall_(function() if UIRef.win then UIRef.win.visible = false end end)
+    pcall_(function() if UIRef.win then UIRef.win:Destroy() end end)
     for _, obj in ipairs_(drawObjs) do
         pcall_(function() obj:Remove() end)
     end
@@ -3866,3 +3800,4 @@ _G.MatchaCleanup = function()
 end
 
 rprint("sell lemons v22 loaded  |  by Inspecttor")
+
