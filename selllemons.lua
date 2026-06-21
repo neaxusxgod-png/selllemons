@@ -669,41 +669,35 @@ if Lib then
     })
     UIRef.win = window
 
-    local tab1 = window:Tab("Features", "gauge")
-    local left = tab1:Section("Farming", "Left")
+    local tab1 = window:Tab("Main", "gauge")
 
-    UIRef.t.AutoBuy = left:Toggle("Auto Buy", false, function(val)
+    local buyL = tab1:Section("Buying", "Left")
+    UIRef.t.AutoBuy = buyL:Toggle("Auto Buy", false, function(val)
         autoBuyActive = val
         if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
         else pcall_(function() localQueue = {}; queueIndex = 1 end) end
         S.saveState()
     end):AddKeybind("1", "Toggle")
-
-    UIRef.t.SkipDecor = left:Toggle("Skip Decor", false, function(val)
+    UIRef.t.SkipDecor = buyL:Toggle("Skip Decor", false, function(val)
         skipDecorActive = val; S.saveState()
     end):Tooltip("skip decoration buttons while auto-buying")
 
-    left:Divider()
-
-    UIRef.t.LemonFarm = left:Toggle("Lemon Farm", false, function(val)
+    local collectL = tab1:Section("Collecting", "Left")
+    UIRef.t.LemonFarm = collectL:Toggle("Lemon Farm", false, function(val)
         lemonFarmActive = val; S.saveState()
     end):AddKeybind("2", "Toggle")
-
-    UIRef.t.AfkDelay = left:Slider("AFK delay", CFG.afkDelay or 6, 1, 1, 30, "s", function(val)
+    UIRef.t.AfkDelay = collectL:Slider("AFK delay", CFG.afkDelay or 6, 1, 1, 30, "s", function(val)
         local s = mfloor(tonumber_(val) or 6); if s < 1 then s = 1 elseif s > 30 then s = 30 end; CFG.afkDelay = s
     end)
-
-    UIRef.t.AutoStand = left:Toggle("Auto Stand", false, function(val)
+    UIRef.t.AutoStand = collectL:Toggle("Auto Stand", false, function(val)
         autoStandActive = val; S.saveState()
     end):AddKeybind("3", "Toggle")
-
-    UIRef.t.CashFarm = left:Toggle("Cash Bags Farm", true, function(val)
+    UIRef.t.CashFarm = collectL:Toggle("Cash Bags Farm", true, function(val)
         cashFarmActive = val; S.saveState()
     end):AddKeybind("4", "Toggle")
 
-    left:Divider("Rebirth")
-
-    UIRef.t.AutoRebirth = left:Toggle("Auto Rebirth", false, function(val)
+    local rebL = tab1:Section("Rebirth", "Left")
+    UIRef.t.AutoRebirth = rebL:Toggle("Auto Rebirth", false, function(val)
         autoRebirthActive = val
         if val then
             RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
@@ -711,38 +705,70 @@ if Lib then
             RB.go = false; RB.wantSlot = false; RB.status = "off"; RB.goSince = 0; RB.openedAt = nil; RB.pct = nil; RB.lastInfo = nil; RB.goN = 0; RB.needCur = false
         end
     end):AddKeybind("5", "Toggle")
-
     RB.thBoost = 1
-    left:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
+    rebL:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
         local m = tonumber_(val) or 25; if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end; RB.gainPct = m
     end)
 
-    local right = tab1:Section("Control", "Right")
-
-    UIRef.t.AutoDeal = right:Toggle("Auto Deal", true, function(val)
+    local autoR = tab1:Section("Automation", "Right")
+    UIRef.t.AutoDeal = autoR:Toggle("Auto Deal", true, function(val)
         autoDealActive = val; S.saveState()
     end)
-
-    UIRef.t.AutoMini = right:Toggle("Auto Minigame", false, function(val)
+    UIRef.t.AutoMini = autoR:Toggle("Auto Minigame", false, function(val)
         MG.active = val; if not val then MG.sessPost = 0 end; S.saveState()
     end)
-
-    UIRef.t.CashVine = right:Toggle("Cash Vine TP", false, function(val)
+    UIRef.t.CashVine = autoR:Toggle("Cash Vine TP", false, function(val)
         if val then CFG.vineGo = true else CFG.vineBack = true end
     end)
-
-    UIRef.t.KeyEsp = right:Toggle("Key / Lever ESP", false, function(val)
+    UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
         keyEspActive = val; S.saveState()
     end)
 
-    right:Divider("System")
+    local tgtR = tab1:Section("Targets", "Right")
+    pcall_(function()
+        local listed = {}
+        for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
+        if #listed == 0 then listed = STAND_NAMES end
+        local standSel = {}
+        for _, nm in ipairs_(listed) do
+            if standEnabled[nm] == nil then standEnabled[nm] = true end
+            if standEnabled[nm] ~= false then standSel[#standSel + 1] = nm end
+        end
+        UIRef.standDd = tgtR:Dropdown("Active stands", standSel, listed, true, function(v)
+            local set = {}
+            for _, nm in ipairs_(v) do set[nm] = true end
+            for _, nm in ipairs_(listed) do standEnabled[nm] = set[nm] == true end
+            S.saveState()
+        end, "which stands the bot upgrades", true)
 
-    UIRef.t.FpsSave = right:Toggle("FPS Save", false, function(val)
+        local mgList = MG.list()
+        local realMg = {}
+        for _, nm in ipairs_(mgList) do
+            if nm:lower():find("trade") then
+                MG.enabled[nm] = false
+            else
+                if MG.enabled[nm] == nil then MG.enabled[nm] = true end
+                realMg[#realMg + 1] = nm
+            end
+        end
+        if #realMg > 0 then
+            local mgSel = {}
+            for _, nm in ipairs_(realMg) do if MG.enabled[nm] ~= false then mgSel[#mgSel + 1] = nm end end
+            UIRef.miniDd = tgtR:Dropdown("Active minigames", mgSel, realMg, true, function(v)
+                local set = {}
+                for _, nm in ipairs_(v) do set[nm] = true end
+                for _, nm in ipairs_(realMg) do MG.enabled[nm] = set[nm] == true end
+                S.saveState()
+            end, "which minigames the bot plays", true)
+        end
+    end)
+
+    local sysR = tab1:Section("System", "Right")
+    UIRef.t.FpsSave = sysR:Toggle("FPS Save", false, function(val)
         CFG.slow = val and true or false
         if val then FX.apply() else FX.restore() end
     end):Tooltip("strip graphics for weak PCs")
-
-    UIRef.t.StopAll = right:Toggle("Stop All", false, function(val)
+    UIRef.t.StopAll = sysR:Toggle("Stop All", false, function(val)
         if val then
             S.stopSavedMini = MG.active; MG.active = false
             pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:Set(false) end end)
@@ -754,49 +780,21 @@ if Lib then
         end
     end):AddKeybind("6", "Toggle"):SetRisk()
 
-    pcall_(function()
-        local autoTab = window:Tab("Stands & Games", "gamepad")
-
-        local sec = autoTab:Section("Stands", "Left")
-        local listed = {}
-        for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
-        if #listed == 0 then listed = STAND_NAMES end
-        local standSel = {}
-        for _, nm in ipairs_(listed) do
-            if standEnabled[nm] == nil then standEnabled[nm] = true end
-            if standEnabled[nm] ~= false then standSel[#standSel + 1] = nm end
-        end
-        UIRef.standDd = sec:Dropdown("Active stands", standSel, listed, true, function(v)
-            local set = {}
-            for _, nm in ipairs_(v) do set[nm] = true end
-            for _, nm in ipairs_(listed) do standEnabled[nm] = set[nm] == true end
-            S.saveState()
-        end, "which stands the bot upgrades", true)
-
-        local mgList = MG.list()
-        local realMg = {}
-        for _, nm in ipairs_(mgList) do
-            if nm:lower():find("trade") then
-                MG.enabled[nm] = false   -- trading minigame not supported yet
-            else
-                if MG.enabled[nm] == nil then MG.enabled[nm] = true end
-                realMg[#realMg + 1] = nm
-            end
-        end
-        if #realMg > 0 then
-            local mgSec = autoTab:Section("Minigames", "Right")
-            local mgSel = {}
-            for _, nm in ipairs_(realMg) do if MG.enabled[nm] ~= false then mgSel[#mgSel + 1] = nm end end
-            UIRef.miniDd = mgSec:Dropdown("Active minigames", mgSel, realMg, true, function(v)
-                local set = {}
-                for _, nm in ipairs_(v) do set[nm] = true end
-                for _, nm in ipairs_(realMg) do MG.enabled[nm] = set[nm] == true end
-                S.saveState()
-            end, "which minigames the bot plays", true)
-        end
-    end)
-
     window:AddSettingsTab("cog")
+
+    -- floating status HUD, built on the lib's CreateBox: Stat = "label | value" + auto status dot, Bar = rebirth %
+    do
+        local vx = 1920; pcall_(function() vx = camera.ViewportSize.X end)
+        local sbox = Lib:CreateBox({ title = "Sell Lemons", position = Vec2(vx - 306, 50), width = 288 })
+        UIRef.statusBox = sbox
+        for i = 1, 5 do sbox:Stat(function() return (S.slot and S.slot[i]) or "" end) end
+        sbox:Bar(function()
+            local gm = S.barGeom
+            if not gm or (tick_() - (RB.checkStartT or 0)) < 30 then return nil end
+            return gm.pct or 0
+        end)
+    end
+
     Lib:Notify("Sell Lemons", "v22  -  Q to toggle  -  by Inspecttor", 5)
     print("[Hub] INS ui loaded")
 end
@@ -1966,28 +1964,13 @@ for i = 1, 5 do
     stUI.dot[i] = D("Circle", {Radius = 3, NumSides = 12, Filled = true, Position = Vec2(0, 0), Color = C3rgb(255, 200, 40), Transparency = 1, Visible = false, ZIndex = 4})
 end
 
+-- status lines now feed the INS ui CreateBox (S.slot[i] = "label | value", "" hides) instead of raw Drawing
+S.slot = {}
 function S.stLine(valObj, i, fullTxt)
-    local lbl, val = tostring_(fullTxt):match("^(.-)%s+|%s+(.+)$")
-    if not lbl then lbl, val = "", tostring_(fullTxt) end
-    local y = S.stY
-    local L, dt = stUI.lbl[i], stUI.dot[i]
-    L.Text = lbl; L.Position = Vec2(S.stX + 28, y); L.Visible = true
-    valObj.Text = val; valObj.Position = Vec2(S.stX + 122, y); valObj.Visible = true
-    local up = val:upper()
-    if up:find("READY") or up:find("FARMING") or up:find("GO", 1, true) then
-        dt.Color = C3rgb(240, 242, 246)
-        dt.Transparency = 0.45 + 0.45 * math.sin(tick_() * 5)
-    elseif up:find("PAUSED") or up:find("WAIT") or up:find("IDLE") or up:find("STARTS IN")
-        or up:match("^%d+:%d") or up == "--" or up:find("SOON") then
-        dt.Color = C3rgb(120, 122, 130); dt.Transparency = 0.82
-    else
-        dt.Color = C3rgb(200, 202, 210); dt.Transparency = 0.92
-    end
-    dt.Position = Vec2(S.stX + 16, y + 7); dt.Visible = true
-    S.stY = y + 19
+    S.slot[i] = tostring_(fullTxt)
 end
 function S.stHide(valObj, i)
-    valObj.Visible = false; stUI.lbl[i].Visible = false; stUI.dot[i].Visible = false
+    S.slot[i] = ""
 end
 
 local rbBarBg = D("Square", {Size = Vec2(0, 0), Position = Vec2(0, 0), Filled = true, Thickness = 1, Corner = 4, Rounding = 4, Color = C3rgb(28, 28, 33), Transparency = 0.72, Visible = false, ZIndex = 4})
@@ -2290,50 +2273,6 @@ local function pollInput()
         end)
     end
 
-    if (nowA - (S.barT or 0)) >= 0.05 then
-        S.barT = nowA
-        pcall_(function()
-            local gm = S.barGeom
-            if not gm then
-                rbBarBg.Visible = false; rbBarLn.Visible = false
-                for i = 1, 12 do rbBarSegs[i].Visible = false end
-                return
-            end
-            if (tick_() - (RB.checkStartT or 0)) < 30 then return end
-            local pct = gm.pct or 0
-            if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
-            local barW, barH = 200, 8
-            rbBarBg.Position = Vec2(gm.bx, gm.by); rbBarBg.Size = Vec2(barW, barH); rbBarBg.Visible = true
-            rbBarLn.Position = Vec2(gm.bx, gm.by); rbBarLn.Size = Vec2(barW, barH); rbBarLn.Visible = true
-            local t = tick_()
-            local br, bgr, bb = RB.pctRGB(pct)
-            rbBarLn.Color = C3rgb(br, bgr, bb)
-            rbBarLn.Transparency = 0.26 + 0.14 * math.sin(t * ((pct >= 100) and 6 or 2.2))
-            local fw = mfloor((barW - 4) * pct / 100)
-            local segW = (barW - 4) / 12
-            for i = 1, 12 do
-                local s = rbBarSegs[i]
-                local x0 = mfloor((i - 1) * segW)
-                local x1 = mfloor(i * segW) - 1
-                if x1 > fw then x1 = fw end
-                local w = x1 - x0
-                if w > 1 then
-                    local k = 1 + ((pct >= 100) and 0.45 or 0.30) * math.sin(t * 2.6 - i * 0.85)
-                    local r, g, b = br, bgr, bb
-                    if k <= 1 then
-                        r, g, b = r * k, g * k, b * k
-                    else
-                        local u = k - 1
-                        r = r + (255 - r) * u; g = g + (255 - g) * u; b = b + (255 - b) * u
-                    end
-                    s.Position = Vec2(gm.bx + 2 + x0, gm.by + 2); s.Size = Vec2(w, barH - 4)
-                    s.Color = C3rgb(mfloor(r), mfloor(g), mfloor(b)); s.Visible = true
-                else
-                    s.Visible = false
-                end
-            end
-        end)
-    end
     if (nowA - (S.statusT or 0)) < (CFG.slow and 0.4 or 0.15) then return end
     S.statusT = nowA
 
@@ -2517,19 +2456,6 @@ local function pollInput()
         S.barGeom = nil
     end
 
-    if S.stY > vy0 + 16 then
-        local bt = tick_()
-        stUI.title.Position = Vec2(S.stX + 150, vy0 - 1)
-        stUI.title.Transparency = 0.5 + 0.16 * msin(bt * 1.3)
-        stUI.title.Visible = true
-        stUI.panel.Position = Vec2(S.stX, vy0 - 8); stUI.panel.Size = Vec2(300, S.stY - vy0 + 12)
-        stUI.panel.Visible = true
-        stUI.ln.Position = Vec2(S.stX, vy0 - 8); stUI.ln.Size = Vec2(300, S.stY - vy0 + 12)
-        stUI.ln.Transparency = 0.12 + 0.07 * msin(bt * 1.7)
-        stUI.ln.Visible = true
-    else
-        stUI.title.Visible = false; stUI.panel.Visible = false; stUI.ln.Visible = false
-    end
 end
 
 RunService.RenderStepped:Connect(function()
