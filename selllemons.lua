@@ -653,7 +653,12 @@ local function getBuyLocations()
 end
 
 if Lib then
-    Lib:ApplyThemePreset("Waifu")
+    Lib:SetTheme({
+        accentA = C3rgb(252, 211, 49),   -- lemon yellow
+        accentB = C3rgb(240, 165, 25),   -- golden amber
+        bg      = C3rgb(18, 17, 13),     -- warm dark
+        sidebar = C3rgb(18, 17, 13),
+    })
     local window = Lib:CreateWindow({
         title = "Sell Lemons",
         subtitle = "by Inspecttor",
@@ -749,36 +754,45 @@ if Lib then
         end
     end):AddKeybind("6", "Toggle"):SetRisk()
 
-    UIRef.standCb = {}
-    UIRef.miniCb = {}
     pcall_(function()
         local autoTab = window:Tab("Stands & Games", "gamepad")
+
         local sec = autoTab:Section("Stands", "Left")
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
         if #listed == 0 then listed = STAND_NAMES end
-        for idx, nm in ipairs_(listed) do
+        local standSel = {}
+        for _, nm in ipairs_(listed) do
             if standEnabled[nm] == nil then standEnabled[nm] = true end
-            UIRef.standCb[nm] = sec:Toggle(idx .. ". " .. nm, true, function(val)
-                standEnabled[nm] = val; S.saveState()
-            end)
+            if standEnabled[nm] ~= false then standSel[#standSel + 1] = nm end
         end
+        UIRef.standDd = sec:Dropdown("Active stands", standSel, listed, true, function(v)
+            local set = {}
+            for _, nm in ipairs_(v) do set[nm] = true end
+            for _, nm in ipairs_(listed) do standEnabled[nm] = set[nm] == true end
+            S.saveState()
+        end, "which stands the bot upgrades", true)
 
         local mgList = MG.list()
-        if #mgList > 0 then
-            local mgSec = autoTab:Section("Minigames", "Right")
-            for _, nm in ipairs_(mgList) do
-                local soon = nm:lower():find("trade") and true or false
-                if soon then
-                    MG.enabled[nm] = false
-                    mgSec:Toggle(nm .. " (soon)", false, function() end)
-                else
-                    if MG.enabled[nm] == nil then MG.enabled[nm] = true end
-                    UIRef.miniCb[nm] = mgSec:Toggle(nm, true, function(val)
-                        MG.enabled[nm] = val; S.saveState()
-                    end)
-                end
+        local realMg = {}
+        for _, nm in ipairs_(mgList) do
+            if nm:lower():find("trade") then
+                MG.enabled[nm] = false   -- trading minigame not supported yet
+            else
+                if MG.enabled[nm] == nil then MG.enabled[nm] = true end
+                realMg[#realMg + 1] = nm
             end
+        end
+        if #realMg > 0 then
+            local mgSec = autoTab:Section("Minigames", "Right")
+            local mgSel = {}
+            for _, nm in ipairs_(realMg) do if MG.enabled[nm] ~= false then mgSel[#mgSel + 1] = nm end end
+            UIRef.miniDd = mgSec:Dropdown("Active minigames", mgSel, realMg, true, function(v)
+                local set = {}
+                for _, nm in ipairs_(v) do set[nm] = true end
+                for _, nm in ipairs_(realMg) do MG.enabled[nm] = set[nm] == true end
+                S.saveState()
+            end, "which minigames the bot plays", true)
         end
     end)
 
