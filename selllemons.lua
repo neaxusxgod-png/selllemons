@@ -837,15 +837,17 @@ if Lib then
         end
     end):AddKeybind("6", "Toggle"):SetRisk()
 
-    local stat = tab1:Section("Session", "Right", "live stats this session")
-    stat:Label(function() return "Runtime:  " .. fmtClock(tick_() - statsStartT) end)
-    stat:Label(function() return "Cash:  " .. (readCashText() or "...") end)
-    stat:Divider()
-    stat:Label(function() return "Buttons bought:  " .. fmtN(STATS.bought) end)
-    stat:Label(function() return "Lemons collected:  " .. fmtN(STATS.lemons) end)
-    stat:Label(function() return "Cash bags:  " .. fmtN(STATS.bags) end)
-    stat:Label(function() return "Deals accepted:  " .. fmtN(STATS.deals) end)
-    stat:Label(function() return "Rebirths:  " .. fmtN(STATS.rebirths) end)
+    local tabS = window:Tab("Session", "activity")
+    local stOv = tabS:Section("Overview", "Left", "live stats this session")
+    stOv:Label(function() return "Runtime:  " .. fmtClock(tick_() - statsStartT) end)
+    stOv:Label(function() return "Cash:  " .. (readCashText() or "...") end)
+    local stCol = tabS:Section("Collected", "Left", "auto-farm totals")
+    stCol:Label(function() return "Buttons bought:  " .. fmtN(STATS.bought) end)
+    stCol:Label(function() return "Lemons collected:  " .. fmtN(STATS.lemons) end)
+    stCol:Label(function() return "Cash bags:  " .. fmtN(STATS.bags) end)
+    local stAuto = tabS:Section("Automation", "Right", "deals & rebirths")
+    stAuto:Label(function() return "Deals accepted:  " .. fmtN(STATS.deals) end)
+    stAuto:Label(function() return "Rebirths:  " .. fmtN(STATS.rebirths) end)
 
     window:AddSettingsTab("cog")
 
