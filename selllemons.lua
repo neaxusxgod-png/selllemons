@@ -1317,6 +1317,13 @@ local function tpTouchBuy(hrp, btn)
     return false
 end
 
+-- Short, self-clearing per-button cooldown, weak-keyed by INSTANCE so it can NEVER wedge: a bought/destroyed
+-- button is GC'd out of the table, a respawned button is a fresh instance with no cooldown, and the timestamp
+-- always expires. A button we can't buy right now (not enough cash, or isGreyedOut missed it) gets a brief
+-- cooldown so we don't waste a 0.5s TP-touch on it every pass - it's retried a couple seconds later as cash builds.
+local buyCooldown = setmetatable({}, { __mode = "k" })
+local BUY_RETRY = 2.0
+
 _wrap("autobuy-worker", function()
     while ScriptActive do
         syncFromUI()
@@ -1335,15 +1342,19 @@ _wrap("autobuy-worker", function()
             if not autoBuyActive then break end
             -- yield to stand / rebirth / minigame mid-pass so auto-buy doesn't fight them for the character
             if _standIsTapping or (autoRebirthActive and RB.wantSlot) or MG.lemBusy() then break end
+            local cd = buyCooldown[btn]
+            if cd and tick_() < cd then continue end   -- couldn't buy it recently (e.g. not enough cash yet) - skip for now
             local live = false
             pcall_(function() live = btn and btn.Parent and (not myTycoon or btn:IsDescendantOf(myTycoon)) end)
             if live and not isGreyedOut(btn) and not (skipDecorActive and isDecorLive(btn)) then
                 local key = getButtonKey(btn)
                 if tpTouchBuy(hrp, btn) then
+                    buyCooldown[btn] = nil
                     didBuy = true
                     totalBought = totalBought + 1
                     print("[Buy] " .. tostring(key) .. " | Total: " .. totalBought)
                 else
+                    buyCooldown[btn] = tick_() + BUY_RETRY   -- can't buy now; retry in ~2s once cash builds
                     totalFailed = totalFailed + 1
                 end
             end
