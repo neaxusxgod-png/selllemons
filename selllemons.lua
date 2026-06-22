@@ -121,7 +121,6 @@ local autoDealActive   = true
 local autoRebirthActive = false
 local autoEvolveActive  = false
 local evolveProgress    = 0      -- cached evolve % (worker writes, HUD reads) so the HUD doesn't walk the GUI each frame
-local skipCutsceneActive = false
 local keyEspActive      = false
 local _standIsTapping  = false
 
@@ -436,7 +435,6 @@ local function syncToUI()
     pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:Set(autoRebirthActive) end end)
     pcall_(function() if UIRef.t.AutoEvolve then UIRef.t.AutoEvolve:Set(autoEvolveActive) end end)
     pcall_(function() if UIRef.t.AutoDeal  then UIRef.t.AutoDeal:Set(autoDealActive)   end end)
-    pcall_(function() if UIRef.t.SkipCut   then UIRef.t.SkipCut:Set(skipCutsceneActive) end end)
 end
 
 local function stopAll(save)
@@ -876,9 +874,6 @@ if Lib then
     UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
         keyEspActive = val; S.saveState()
     end)
-    UIRef.t.SkipCut = autoR:Toggle("Skip Cutscenes", false, function(val)
-        skipCutsceneActive = val; S.saveState()
-    end):Tooltip("auto-presses Continue on dialogues / intro letter")
 
     local sysR = tab1:Section("System", "Right", "performance & stop-all")
     UIRef.t.FpsSave = sysR:Toggle("FPS Save", false, function(val)
@@ -3463,55 +3458,6 @@ _wrap("auto-evolve", function()
             end
         end
         pcall_(function() local cl = RB.node(RB.gui(), "EvolutionMenu/Close"); if cl then RB.click(cl) end end)  -- close the menu
-        task_wait(0.4)
-    end
-end)
-
--- Skip Cutscenes: the game's cutscenes live in the "Cinematic" ScreenGui. Dialogues (Continue button) and the
--- intro letter (ClickArea) BLOCK until clicked; auto-press them when shown. (Evolve/ascension animations have
--- no button and just auto-play.) _guiShown walks the ancestor chain so we only click actually-visible buttons.
-local function _guiShown(d)
-    local shown = true
-    pcall_(function()
-        local cur = d
-        for _ = 1, 12 do
-            if not cur then break end
-            if cur:IsA("GuiObject") and cur.Visible == false then shown = false; return end
-            if cur:IsA("ScreenGui") then if cur.Enabled == false then shown = false end; return end
-            cur = cur.Parent
-        end
-    end)
-    return shown
-end
-_wrap("skip-cutscene", function()
-    while ScriptActive do
-        syncFromUI()
-        if not skipCutsceneActive then task_wait(0.5); continue end
-        local pg = getPlayerGui()
-        local cin = pg and pg:FindFirstChild("Cinematic")
-        if cin then
-            -- The Evolution/Ascension animations have NO skip button -> just hide the frame (only way from outside).
-            pcall_(function()
-                for _, nm in ipairs_({"EvolutionAnimation", "AscensionAnimation"}) do
-                    local f = cin:FindFirstChild(nm)
-                    if f and f:IsA("GuiObject") and f.Visible then f.Visible = false end
-                end
-            end)
-            -- Dialogues / the intro letter DO have a button that blocks until clicked -> press the shown one.
-            pcall_(function()
-                for _, d in ipairs_(cin:GetDescendants()) do
-                    if (d:IsA("ImageButton") or d:IsA("TextButton")) and (d.Name == "Continue" or d.Name == "ClickArea") then
-                        if _guiShown(d) then
-                            local ap; pcall_(function() ap = d.AbsolutePosition end)
-                            if ap and (ap.X > 1 or ap.Y > 1) then
-                                RB.busyT = tick_(); RB.prepClick(); RB.click(d)
-                                break
-                            end
-                        end
-                    end
-                end
-            end)
-        end
         task_wait(0.4)
     end
 end)
