@@ -838,7 +838,7 @@ if Lib then
     end)
     UIRef.t.AutoEvolve = farm:Toggle("Auto Evolve", false, function(val)
         autoEvolveActive = val; S.saveState()
-    end):AddKeybind("7", "Toggle"):Tooltip("auto-presses Evolve when progress hits 100%")
+    end):AddKeybind("6", "Toggle"):Tooltip("auto-presses Evolve when progress hits 100%")
 
     local autoR = tab1:Section("Automation", "Right", "deals, minigames, vine")
     UIRef.t.AutoDeal = autoR:Toggle("Auto Deal", true, function(val)
@@ -890,7 +890,7 @@ if Lib then
             pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:Set(MG.active) end end)
             stopAll(false)
         end
-    end):AddKeybind("6", "Toggle"):SetRisk()
+    end):AddKeybind("7", "Toggle"):SetRisk()
 
     local tabS = window:Tab("Session", "activity")
     local stOv = tabS:Section("Overview", "Left", "live stats this session")
