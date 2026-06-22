@@ -76,6 +76,7 @@ local cashFarmActive   = true
 local autoStandActive  = false
 local autoDealActive   = true
 local autoRebirthActive = false
+local autoEvolveActive  = false
 local keyEspActive      = false
 local _standIsTapping  = false
 
@@ -388,6 +389,7 @@ local function syncToUI()
     pcall_(function() if UIRef.t.AutoStand then UIRef.t.AutoStand:Set(autoStandActive) end end)
     pcall_(function() if UIRef.t.CashFarm  then UIRef.t.CashFarm:Set(cashFarmActive)   end end)
     pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:Set(autoRebirthActive) end end)
+    pcall_(function() if UIRef.t.AutoEvolve then UIRef.t.AutoEvolve:Set(autoEvolveActive) end end)
     pcall_(function() if UIRef.t.AutoDeal  then UIRef.t.AutoDeal:Set(autoDealActive)   end end)
 end
 
@@ -396,10 +398,10 @@ local function stopAll(save)
     if save then
         S.stopSaved = {
             ab = autoBuyActive, lf = lemonFarmActive, cf = cashFarmActive,
-            as = autoStandActive, ar = autoRebirthActive, ad = autoDealActive,
+            as = autoStandActive, ar = autoRebirthActive, ad = autoDealActive, ae = autoEvolveActive,
         }
         autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive, autoRebirthActive = false, false, false, false, false
-        autoDealActive = false
+        autoDealActive = false; autoEvolveActive = false
         resetBuyBlacklist()
         syncToUI()
         print("[Hub] Stop All ON - всё остановлено (состояние сохранено)")
@@ -408,6 +410,7 @@ local function stopAll(save)
         if s then
             autoBuyActive, lemonFarmActive, cashFarmActive = s.ab, s.lf, s.cf
             autoStandActive, autoRebirthActive, autoDealActive = s.as, s.ar, s.ad
+            autoEvolveActive = s.ae
             S.stopSaved = nil
         end
         syncToUI()
@@ -443,7 +446,7 @@ local RB = { mult = 2, lastPeek = 0, lastReb = 0, goSince = 0, peekEvery = 60, g
 
 -- ── Session stats. Declared HERE (before the menu) so the live :Label closures can capture STATS; the farm
 -- loops below write into it. Buttons live in STATS.bought (was the old `STATS.bought`). ──
-local STATS = { bought = 0, deals = 0, lemons = 0, bags = 0, rebirths = 0 }
+local STATS = { bought = 0, deals = 0, lemons = 0, bags = 0, rebirths = 0, evolves = 0 }
 local statsStartT = tick_()
 local _bagSeen = {}
 pcall_(function() setmetatable(_bagSeen, { __mode = "k" }) end)   -- weak: counts each cash bag once, no leak
@@ -786,6 +789,9 @@ if Lib then
     farm:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
         local m = tonumber_(val) or 25; if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end; RB.gainPct = m
     end)
+    UIRef.t.AutoEvolve = farm:Toggle("Auto Evolve", false, function(val)
+        autoEvolveActive = val; S.saveState()
+    end):AddKeybind("7", "Toggle"):Tooltip("auto-presses Evolve when progress hits 100%")
 
     local autoR = tab1:Section("Automation", "Right", "deals, minigames, vine")
     UIRef.t.AutoDeal = autoR:Toggle("Auto Deal", true, function(val)
@@ -850,6 +856,7 @@ if Lib then
     local stAuto = tabS:Section("Automation", "Right", "deals & rebirths")
     stAuto:Label(function() return "Deals accepted:  " .. fmtN(STATS.deals) end)
     stAuto:Label(function() return "Rebirths:  " .. fmtN(STATS.rebirths) end)
+    stAuto:Label(function() return "Evolves:  " .. fmtN(STATS.evolves) end)
 
     window:AddSettingsTab("cog")
 
@@ -3335,6 +3342,33 @@ _wrap("auto-rebirth", function()
             RB.go = false
         end
         task_wait(CFG.slow and 1.4 or 0.8)
+    end
+end)
+
+-- Auto Evolve: same idea as rebirth but simple - EvolutionMenu/Body/Progress shows "NN%", and the
+-- Evolve button (EvolutionMenu/Body/Evolve) is pressable at 100%. Reuse RB's GUI helpers.
+_wrap("auto-evolve", function()
+    while ScriptActive do
+        syncFromUI()
+        if not autoEvolveActive then task_wait(0.6); continue end
+        if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 then task_wait(0.4); continue end
+        local g = RB.gui()
+        local prog = g and RB.node(g, "EvolutionMenu/Body/Progress")
+        local pct = tonumber((prog and RB.text(prog) or ""):match("(%d+)")) or 0
+        if pct >= 100 then
+            RB.busyT = tick_()
+            RB.prepClick()                                          -- exit lemon-farm zoom so the mouse can click GUI
+            local side = RB.node(g, "Sidebar/Container/Evolution")
+            if side then RB.click(side); task_wait(0.3) end         -- open the Evolution menu
+            local btn = RB.node(RB.gui(), "EvolutionMenu/Body/Evolve")
+            if btn and RB.click(btn) then
+                STATS.evolves = STATS.evolves + 1
+                print("[Evolve] pressed Evolve (progress " .. pct .. "%)")
+            end
+            task_wait(2.5)                                          -- let it apply + progress reset
+        else
+            task_wait(0.8)
+        end
     end
 end)
 
