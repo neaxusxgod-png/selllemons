@@ -347,12 +347,14 @@ end
 
 local Lib
 do
-    local ok, err = pcall_(function()
-        Lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.lua"))()
-    end)
+    for _ = 1, 6 do   -- HttpGet can return a truncated body on a big file; retry until the lib loads fully
+        local ok, res = pcall_(function() return loadstring(game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.lua"))() end)
+        if ok and type(res) == "table" then Lib = res; break end
+        task_wait(0.4)
+    end
     if type(Lib) ~= "table" then pcall_(function() Lib = INSui end) end
-    if not Lib then
-        print("[Hub] INS ui ne zagruzilsya (" .. tostring(err) .. ") - klavishi 1-5 rabotayut kak follbek")
+    if type(Lib) ~= "table" then
+        print("[Hub] INS ui ne zagruzilsya - klavishi 1-5 rabotayut kak follbek")
     end
 end
 
@@ -661,7 +663,7 @@ if Lib then
     })
     local window = Lib:CreateWindow({
         title = "Sell Lemons",
-        subtitle = "by Inspecttor",
+        subtitle = "auto",
         size = Vec2(580, 542),
         badge = "v22",
         menuKey = "q",
