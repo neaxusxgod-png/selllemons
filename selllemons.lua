@@ -118,9 +118,10 @@ local function markBuyFail(key, v)
     if not a then a = { n = 0, next = 0 }; buyAttempt[key] = a end
     a.inst = v or a.inst
     a.n = a.n + 1
-    local d = 0.35 * (2 ^ (a.n - 1))
-    if d > 4 then d = 4 end
-    if a.n >= 6 then d = 20 end
+    -- gentle linear cooldown capped at 2s (was exponential up to a 20s lockout that skipped buttons you
+    -- could already afford a moment later, as cash keeps coming in)
+    local d = 0.5 + 0.25 * a.n
+    if d > 2 then d = 2 end
     a.next = tick_() + d
 end
 
@@ -1323,21 +1324,30 @@ _wrap("autobuy-worker", function()
         LSM.lastBot = tick_(); LSM.buySweepT = tick_()
         pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
         task_wait(0.03)
-        pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-        task_wait(0.03)
-        LSM.lastBot = tick_(); LSM.buySweepT = tick_()
-        task_wait(0.04)
-        local stillExists = false
-        pcall_(function() stillExists = btn and btn.Parent and btn:IsDescendantOf(myTycoon) end)
-        if stillExists then
-            markBuyFail(key, btn)
-            totalFailed = totalFailed + 1
-        else
-            buyBlacklist[key]  = true
+        -- Stand ON the button and poll until it disappears. Touch -> server removes the button -> it
+        -- replicates back to us = a network round-trip (~0.1-0.3s). The old code checked once after a fixed
+        -- 0.07s, which was too fast, so real buys got counted as fails -> backoff -> 20s lockout -> skips.
+        local bought = false
+        local deadline = tick_() + 0.35
+        repeat
+            pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
+            LSM.lastBot = tick_(); LSM.buySweepT = tick_()
+            task_wait(0.03)
+            local exists = false
+            pcall_(function() exists = btn and btn.Parent and btn:IsDescendantOf(myTycoon) end)
+            if not exists then bought = true; break end
+        until tick_() >= deadline
+        if bought then
+            -- No permanent buyBlacklist: a button that respawns at the same spot (e.g. after a rebirth) keeps
+            -- the same position-key and must stay buyable. The bought instance has Parent=nil, so the queue
+            -- scan skips it on its own without us blacklisting the key forever.
             buyAttempt[key]    = nil
             failedButtons[key] = nil
             totalBought = totalBought + 1
             print("[Buy] " .. key .. " | Total: " .. totalBought)
+        else
+            markBuyFail(key, btn)
+            totalFailed = totalFailed + 1
         end
 
         if totalBought % 20 == 0 then cleanupQueue() end
