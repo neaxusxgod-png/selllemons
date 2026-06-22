@@ -3376,22 +3376,30 @@ local function findEvolveConfirm()
     return best
 end
 
--- Auto Evolve: same idea as rebirth but simple - EvolutionMenu/Body/Progress shows "NN%", and the
--- Evolve button (EvolutionMenu/Body/Evolve) is pressable at 100%. Reuse RB's GUI helpers.
+-- Auto Evolve: PEEK the Evolution menu (the Progress text isn't reliably live while the menu is closed -
+-- worked for one tester, not another). Each peek: open the "portal" sidebar button -> read live Progress ->
+-- if 100% press Evolve + confirm -> close. Peeks often when close to ready, rarely otherwise (like rebirth).
+local _evolveLastPeek = 0
 _wrap("auto-evolve", function()
     while ScriptActive do
         syncFromUI()
         if not autoEvolveActive then task_wait(0.6); continue end
-        if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 then task_wait(0.4); continue end
+        if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then task_wait(0.4); continue end
+        local interval = (evolveProgress >= 90) and 8 or 45
+        if (tick_() - _evolveLastPeek) < interval then task_wait(0.5); continue end
+        _evolveLastPeek = tick_()
+
         local g = RB.gui()
-        local prog = g and RB.node(g, "EvolutionMenu/Body/Progress")
+        if not g then task_wait(1); continue end
+        RB.busyT = tick_()
+        RB.prepClick()                                              -- exit lemon zoom so the mouse can click GUI
+        local side = RB.node(g, "Sidebar/Container/Evolution")
+        if not (side and RB.click(side)) then task_wait(0.5); continue end   -- open the menu (click the portal)
+        task_wait(0.35)
+        local prog = RB.node(RB.gui(), "EvolutionMenu/Body/Progress")
         local pct = tonumber((prog and RB.text(prog) or ""):match("([%d%.]+)")) or 0
         evolveProgress = pct
         if pct >= 100 then
-            RB.busyT = tick_()
-            RB.prepClick()                                          -- exit lemon-farm zoom so the mouse can click GUI
-            local side = RB.node(g, "Sidebar/Container/Evolution")
-            if side then RB.click(side); task_wait(0.3) end         -- open the Evolution menu
             local btn = RB.node(RB.gui(), "EvolutionMenu/Body/Evolve")
             if btn and RB.click(btn) then
                 task_wait(0.4)
@@ -3399,17 +3407,15 @@ _wrap("auto-evolve", function()
                 for _ = 1, 10 do cf = findEvolveConfirm(); if cf then break end; task_wait(0.15) end
                 if cf and RB.click(cf) then
                     STATS.evolves = STATS.evolves + 1
-                    print("[Evolve] evolved (confirmed); progress was " .. pct .. "%")
+                    print("[Evolve] evolved (confirmed); was " .. pct .. "%")
                 else
-                    print("[Evolve] pressed Evolve but no confirm button appeared")
+                    print("[Evolve] pressed Evolve but no confirm appeared")
                 end
+                task_wait(0.6)
             end
-            task_wait(0.4)
-            pcall_(function() local cl = RB.node(RB.gui(), "EvolutionMenu/Close"); if cl then RB.click(cl) end end)  -- close the menu so it doesn't stay open
-            task_wait(2.5)                                          -- let it apply + progress reset
-        else
-            task_wait(0.8)
         end
+        pcall_(function() local cl = RB.node(RB.gui(), "EvolutionMenu/Close"); if cl then RB.click(cl) end end)  -- close the menu
+        task_wait(0.4)
     end
 end)
 
