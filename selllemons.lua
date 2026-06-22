@@ -672,35 +672,53 @@ if Lib then
 
     local tab1 = window:Tab("Main", "gauge")
 
-    local buyL = tab1:Section("Buying", "Left", "auto-buy tycoon buttons")
-    UIRef.t.AutoBuy = buyL:Toggle("Auto Buy", false, function(val)
+    -- one card with the main toggles (hotkeys 1-5); each chooser sits right under its toggle
+    local farm = tab1:Section("Farming", "Left", "auto-farms, stands & rebirth")
+    UIRef.t.AutoBuy = farm:Toggle("Auto Buy", false, function(val)
         autoBuyActive = val
         if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
         else pcall_(function() localQueue = {}; queueIndex = 1 end) end
         pcall_(function() if Lib and Lib.SetPerformance then Lib:SetPerformance(val) end end)   -- lite GUI (60fps, no glow) while auto-buying frees the single Lua thread -> no freeze/lag
         S.saveState()
     end):AddKeybind("1", "Toggle")
-    UIRef.t.SkipDecor = buyL:Toggle("Skip Decor", false, function(val)
+    UIRef.t.SkipDecor = farm:Toggle("Skip Decor", false, function(val)
         skipDecorActive = val; S.saveState()
     end):Tooltip("skip decoration buttons while auto-buying")
 
-    local collectL = tab1:Section("Collecting", "Left", "lemons, stands, cash bags")
-    UIRef.t.LemonFarm = collectL:Toggle("Lemon Farm", false, function(val)
+    farm:Divider()
+    UIRef.t.LemonFarm = farm:Toggle("Lemon Farm", false, function(val)
         lemonFarmActive = val; S.saveState()
     end):AddKeybind("2", "Toggle")
-    UIRef.t.AfkDelay = collectL:Slider("AFK delay", CFG.afkDelay or 6, 1, 1, 30, "s", function(val)
+    UIRef.t.AfkDelay = farm:Slider("AFK delay", CFG.afkDelay or 6, 1, 1, 30, "s", function(val)
         local s = mfloor(tonumber_(val) or 6); if s < 1 then s = 1 elseif s > 30 then s = 30 end; CFG.afkDelay = s
     end)
-    collectL:Divider()
-    UIRef.t.AutoStand = collectL:Toggle("Auto Stand", false, function(val)
+
+    farm:Divider()
+    UIRef.t.AutoStand = farm:Toggle("Auto Stand", false, function(val)
         autoStandActive = val; S.saveState()
     end):AddKeybind("3", "Toggle")
-    UIRef.t.CashFarm = collectL:Toggle("Cash Bags Farm", true, function(val)
+    pcall_(function()   -- stand chooser, right under Auto Stand
+        local listed = {}
+        for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
+        if #listed == 0 then listed = STAND_NAMES end
+        local standSel = {}
+        for _, nm in ipairs_(listed) do
+            if standEnabled[nm] == nil then standEnabled[nm] = true end
+            if standEnabled[nm] ~= false then standSel[#standSel + 1] = nm end
+        end
+        UIRef.standDd = farm:Dropdown("Active stands", standSel, listed, true, function(v)
+            local set = {}
+            for _, nm in ipairs_(v) do set[nm] = true end
+            for _, nm in ipairs_(listed) do standEnabled[nm] = set[nm] == true end
+            S.saveState()
+        end, "which stands the bot upgrades", true)
+    end)
+    UIRef.t.CashFarm = farm:Toggle("Cash Bags Farm", true, function(val)
         cashFarmActive = val; S.saveState()
     end):AddKeybind("4", "Toggle")
 
-    local rebL = tab1:Section("Rebirth", "Left", "auto-rebirth at a target")
-    UIRef.t.AutoRebirth = rebL:Toggle("Auto Rebirth", false, function(val)
+    farm:Divider()
+    UIRef.t.AutoRebirth = farm:Toggle("Auto Rebirth", false, function(val)
         autoRebirthActive = val
         if val then
             RB.lastPeek = tick_() - ((RB.peekEvery or 60) - 10)
@@ -709,7 +727,7 @@ if Lib then
         end
     end):AddKeybind("5", "Toggle")
     RB.thBoost = 1
-    rebL:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
+    farm:Slider("Rebirth at", 25, 0.001, 0.001, 10000, "%", function(val)
         local m = tonumber_(val) or 25; if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end; RB.gainPct = m
     end)
 
@@ -720,31 +738,7 @@ if Lib then
     UIRef.t.AutoMini = autoR:Toggle("Auto Minigame", false, function(val)
         MG.active = val; if not val then MG.sessPost = 0 end; S.saveState()
     end)
-    UIRef.t.CashVine = autoR:Toggle("Cash Vine TP", false, function(val)
-        if val then CFG.vineGo = true else CFG.vineBack = true end
-    end)
-    autoR:Divider("Visuals")
-    UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
-        keyEspActive = val; S.saveState()
-    end)
-
-    local tgtR = tab1:Section("Targets", "Right", "what the bot upgrades & plays")
-    pcall_(function()
-        local listed = {}
-        for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
-        if #listed == 0 then listed = STAND_NAMES end
-        local standSel = {}
-        for _, nm in ipairs_(listed) do
-            if standEnabled[nm] == nil then standEnabled[nm] = true end
-            if standEnabled[nm] ~= false then standSel[#standSel + 1] = nm end
-        end
-        UIRef.standDd = tgtR:Dropdown("Active stands", standSel, listed, true, function(v)
-            local set = {}
-            for _, nm in ipairs_(v) do set[nm] = true end
-            for _, nm in ipairs_(listed) do standEnabled[nm] = set[nm] == true end
-            S.saveState()
-        end, "which stands the bot upgrades", true)
-
+    pcall_(function()   -- minigame chooser, right under Auto Minigame
         local mgList = MG.list()
         local realMg = {}
         for _, nm in ipairs_(mgList) do
@@ -758,13 +752,20 @@ if Lib then
         if #realMg > 0 then
             local mgSel = {}
             for _, nm in ipairs_(realMg) do if MG.enabled[nm] ~= false then mgSel[#mgSel + 1] = nm end end
-            UIRef.miniDd = tgtR:Dropdown("Active minigames", mgSel, realMg, true, function(v)
+            UIRef.miniDd = autoR:Dropdown("Active minigames", mgSel, realMg, true, function(v)
                 local set = {}
                 for _, nm in ipairs_(v) do set[nm] = true end
                 for _, nm in ipairs_(realMg) do MG.enabled[nm] = set[nm] == true end
                 S.saveState()
             end, "which minigames the bot plays", true)
         end
+    end)
+    UIRef.t.CashVine = autoR:Toggle("Cash Vine TP", false, function(val)
+        if val then CFG.vineGo = true else CFG.vineBack = true end
+    end)
+    autoR:Divider("Visuals")
+    UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
+        keyEspActive = val; S.saveState()
     end)
 
     local sysR = tab1:Section("System", "Right", "performance & stop-all")
