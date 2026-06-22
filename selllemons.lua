@@ -77,6 +77,7 @@ local autoStandActive  = false
 local autoDealActive   = true
 local autoRebirthActive = false
 local autoEvolveActive  = false
+local evolveProgress    = 0      -- cached evolve % (worker writes, HUD reads) so the HUD doesn't walk the GUI each frame
 local keyEspActive      = false
 local _standIsTapping  = false
 
@@ -865,7 +866,7 @@ if Lib then
         local vx = 1920; pcall_(function() vx = camera.ViewportSize.X end)
         local sbox = Lib:CreateBox({ title = "Sell Lemons", position = Vec2(vx - 306, 50), width = 288 })
         UIRef.statusBox = sbox
-        for i = 1, 5 do sbox:Stat(function() return (S.slot and S.slot[i]) or "" end) end
+        for i = 1, 6 do sbox:Stat(function() return (S.slot and S.slot[i]) or "" end) end
         sbox:Bar(function()
             local gm = S.barGeom
             if not gm or (tick_() - (RB.checkStartT or 0)) < 30 then return nil end
@@ -2492,6 +2493,13 @@ local function pollInput()
         S.barGeom = nil
     end
 
+    if autoEvolveActive then
+        local t6 = (evolveProgress >= 100) and "READY" or (evolveProgress .. "%  |  " .. (100 - evolveProgress) .. "% left")
+        S.stLine(statusTx5, 6, "evolve  |  " .. t6)
+    else
+        S.stHide(statusTx5, 6)
+    end
+
 end
 
 RunService.RenderStepped:Connect(function()
@@ -3375,6 +3383,7 @@ _wrap("auto-evolve", function()
         local g = RB.gui()
         local prog = g and RB.node(g, "EvolutionMenu/Body/Progress")
         local pct = tonumber((prog and RB.text(prog) or ""):match("(%d+)")) or 0
+        evolveProgress = pct
         if pct >= 100 then
             RB.busyT = tick_()
             RB.prepClick()                                          -- exit lemon-farm zoom so the mouse can click GUI
