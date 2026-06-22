@@ -360,7 +360,7 @@ do
     local lastBody
     for _ = 1, 8 do
         local body = nil
-        pcall_(function() body = game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.lua") end)
+        pcall_(function() body = game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.min.lua") end)
         if type(body) == "string" and #body > 1000 then
             lastBody = body
             if body:find("INSUI_FILE_END", 1, true) then
