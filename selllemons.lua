@@ -348,10 +348,24 @@ end
 
 local Lib
 do
-    for _ = 1, 6 do   -- HttpGet can return a truncated body on a big file; retry until the lib loads fully
-        local ok, res = pcall_(function() return loadstring(game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.lua"))() end)
-        if ok and type(res) == "table" then Lib = res; break end
+    -- HttpGet can return a TRUNCATED body on a big file. Only run a body that downloaded fully (it ends with
+    -- the INSUI_FILE_END marker) - running a partial body can start a half-built render loop (flicker) or
+    -- return nil ("Lib nil"). Retry until we get a complete one; best-effort on the last body as a fallback.
+    local lastBody
+    for _ = 1, 8 do
+        local body = nil
+        pcall_(function() body = game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.lua") end)
+        if type(body) == "string" and #body > 1000 then
+            lastBody = body
+            if body:find("INSUI_FILE_END", 1, true) then
+                local ok, res = pcall_(function() return loadstring(body)() end)
+                if ok and type(res) == "table" then Lib = res; break end
+            end
+        end
         task_wait(0.4)
+    end
+    if type(Lib) ~= "table" and type(lastBody) == "string" then
+        pcall_(function() local r = loadstring(lastBody)(); if type(r) == "table" then Lib = r end end)
     end
     if type(Lib) ~= "table" then pcall_(function() Lib = INSui end) end
     if type(Lib) ~= "table" then
