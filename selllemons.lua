@@ -465,6 +465,9 @@ local function fmtClock(sec)
     if h > 0 then return sformat("%d:%02d:%02d", h, m, s) end
     return sformat("%d:%02d", m, s)
 end
+local function fmtPct1(n)   -- percentage with up to 1 decimal, trailing ".0" stripped (0.1 -> "0.1", 50.0 -> "50")
+    return (sformat("%.1f", tonumber(n) or 0):gsub("%.0$", ""))
+end
 local _cashCache = { t = -1, v = nil }
 local function readCashText()   -- the live $balance text from the game HUD; cached 0.5s (per-frame DOM walk is costly)
     local now = tick_()
@@ -2494,7 +2497,7 @@ local function pollInput()
     end
 
     if autoEvolveActive then
-        local t6 = (evolveProgress >= 100) and "READY" or (evolveProgress .. "%  |  " .. (100 - evolveProgress) .. "% left")
+        local t6 = (evolveProgress >= 100) and "READY" or (fmtPct1(evolveProgress) .. "%  |  " .. fmtPct1(100 - evolveProgress) .. "% left")
         S.stLine(statusTx5, 6, "evolve  |  " .. t6)
     else
         S.stHide(statusTx5, 6)
@@ -3382,7 +3385,7 @@ _wrap("auto-evolve", function()
         if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 then task_wait(0.4); continue end
         local g = RB.gui()
         local prog = g and RB.node(g, "EvolutionMenu/Body/Progress")
-        local pct = tonumber((prog and RB.text(prog) or ""):match("(%d+)")) or 0
+        local pct = tonumber((prog and RB.text(prog) or ""):match("([%d%.]+)")) or 0
         evolveProgress = pct
         if pct >= 100 then
             RB.busyT = tick_()
