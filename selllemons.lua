@@ -1267,8 +1267,15 @@ end
 
 _wrap("autobuy-worker", function()
     local emptyStreak = 0
+    local _prevAB = false
     while ScriptActive do
         syncFromUI()
+        if autoBuyActive and not _prevAB then
+            -- Re-enabling Auto Buy fully resets the skip-state (backoff timers / queue / blacklist) so toggling
+            -- it off and on recovers a button that got stuck-skipped, instead of needing a full script restart.
+            resetBuyBlacklist(); localQueue = {}; queueIndex = 1
+        end
+        _prevAB = autoBuyActive
         if not autoBuyActive then task_wait(0.05); continue end
 
         if _standIsTapping or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy()
@@ -1342,7 +1349,7 @@ _wrap("autobuy-worker", function()
         -- replicates back to us = a network round-trip (~0.1-0.3s). The old code checked once after a fixed
         -- 0.07s, which was too fast, so real buys got counted as fails -> backoff -> 20s lockout -> skips.
         local bought = false
-        local deadline = tick_() + 0.35
+        local deadline = tick_() + 0.5   -- generous so a slow PC / high ping still registers the buy before it counts a fail
         repeat
             pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
             LSM.lastBot = tick_(); LSM.buySweepT = tick_()
