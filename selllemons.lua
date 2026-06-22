@@ -1881,19 +1881,17 @@ _wrap("lemon-farm", function()
                     end
                     local fp = _camFirstPerson(hA)
                     if fp ~= nil then LSM.zoomedIn = fp end
-                    -- orient runs ONLY on entering first-person now (it used to re-run every 3s, so the camera
-                    -- kept snapping up during farming). processLemon aims at each lemon afterwards.
-                    pcall_(function()
-                        if hA then
-                            camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
-                        end
-                    end)
-                    pcall_(function()
-                        if type(mousemoverel) == "function" and _windowFocused() and _camFirstPerson(hA) ~= false then
-                            for _ = 1, 6 do mousemoverel(0, -250); LSM.lastBot = tick_(); task_wait(0.02) end
-                        end
-                    end)
                 end
+                pcall_(function()
+                    if hA then
+                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
+                    end
+                end)
+                pcall_(function()
+                    if type(mousemoverel) == "function" and _windowFocused() and _camFirstPerson(hA) ~= false then
+                        for _ = 1, 6 do mousemoverel(0, -250); LSM.lastBot = tick_(); task_wait(0.02) end
+                    end
+                end)
             end
             lemonFailCount = {}
 
