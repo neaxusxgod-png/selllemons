@@ -683,7 +683,7 @@ if Lib then
         skipDecorActive = val; S.saveState()
     end):Tooltip("skip decoration buttons while auto-buying")
 
-    local collectL = tab1:Section("Collecting", "Left", "lemons · stands · cash bags")
+    local collectL = tab1:Section("Collecting", "Left", "lemons, stands, cash bags")
     UIRef.t.LemonFarm = collectL:Toggle("Lemon Farm", false, function(val)
         lemonFarmActive = val; S.saveState()
     end):AddKeybind("2", "Toggle")
@@ -711,7 +711,7 @@ if Lib then
         local m = tonumber_(val) or 25; if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end; RB.gainPct = m
     end)
 
-    local autoR = tab1:Section("Automation", "Right", "deals · minigames · vine")
+    local autoR = tab1:Section("Automation", "Right", "deals, minigames, vine")
     UIRef.t.AutoDeal = autoR:Toggle("Auto Deal", true, function(val)
         autoDealActive = val; S.saveState()
     end)
