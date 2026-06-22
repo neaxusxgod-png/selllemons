@@ -760,9 +760,7 @@ if Lib then
             end, "which minigames the bot plays", true)
         end
     end)
-    UIRef.t.CashVine = autoR:Toggle("Cash Vine TP", false, function(val)
-        if val then CFG.vineGo = true else CFG.vineBack = true end
-    end)
+    autoR:Button("Cash Vine TP", function() CFG.vineGo = true end)
     autoR:Divider("Visuals")
     UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
         keyEspActive = val; S.saveState()
@@ -2253,28 +2251,15 @@ local function pollInput()
         end
     end
 
-    if CFG.vineGo or CFG.vineBack then
+    if CFG.vineGo then   -- one-way teleport to the cash vine (button); no teleport-back
         CFG.vineGo = false
-        CFG.vineBack = false
         pcall_(function()
             local chr = player.Character
             local h = chr and chr:FindFirstChild("HumanoidRootPart")
             if not h then return end
-            local nearVine = (h.Position - Vec3(39.7, -41.0, -77.5)).Magnitude < 40
-            if nearVine then
-                local ret = CFG.vineRet
-                if ret then
-                    h.CFrame = CF(ret.X, ret.Y + 1, ret.Z)
-                    h.AssemblyLinearVelocity = Vec3(0, 0, 0)
-                    CFG.vineRet = nil
-                    print("[Vine] returned")
-                end
-            else
-                CFG.vineRet = h.Position
-                h.CFrame = CF(39.7, -41.0, -77.5)
-                h.AssemblyLinearVelocity = Vec3(0, 0, 0)
-                print("[Vine] at the vine - press again to return")
-            end
+            h.CFrame = CF(39.7, -41.0, -77.5)
+            h.AssemblyLinearVelocity = Vec3(0, 0, 0)
+            print("[Vine] teleported to the cash vine")
         end)
     end
 
