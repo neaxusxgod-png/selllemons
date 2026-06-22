@@ -3401,6 +3401,8 @@ _wrap("auto-evolve", function()
                     print("[Evolve] pressed Evolve but no confirm button appeared")
                 end
             end
+            task_wait(0.4)
+            pcall_(function() local cl = RB.node(RB.gui(), "EvolutionMenu/Close"); if cl then RB.click(cl) end end)  -- close the menu so it doesn't stay open
             task_wait(2.5)                                          -- let it apply + progress reset
         else
             task_wait(0.8)
