@@ -3490,6 +3490,14 @@ _wrap("skip-cutscene", function()
         local pg = getPlayerGui()
         local cin = pg and pg:FindFirstChild("Cinematic")
         if cin then
+            -- The Evolution/Ascension animations have NO skip button -> just hide the frame (only way from outside).
+            pcall_(function()
+                for _, nm in ipairs_({"EvolutionAnimation", "AscensionAnimation"}) do
+                    local f = cin:FindFirstChild(nm)
+                    if f and f:IsA("GuiObject") and f.Visible then f.Visible = false end
+                end
+            end)
+            -- Dialogues / the intro letter DO have a button that blocks until clicked -> press the shown one.
             pcall_(function()
                 for _, d in ipairs_(cin:GetDescendants()) do
                     if (d:IsA("ImageButton") or d:IsA("TextButton")) and (d.Name == "Continue" or d.Name == "ClickArea") then
