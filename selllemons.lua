@@ -447,6 +447,8 @@ local STATS = { bought = 0, deals = 0, lemons = 0, bags = 0, rebirths = 0 }
 local statsStartT = tick_()
 local _bagSeen = {}
 pcall_(function() setmetatable(_bagSeen, { __mode = "k" }) end)   -- weak: counts each cash bag once, no leak
+local _lemonPending = {}
+pcall_(function() setmetatable(_lemonPending, { __mode = "k" }) end)  -- lemons we clicked; tallied once they actually vanish
 local function fmtN(n)
     local s = tostring_(mfloor(tonumber(n) or 0))
     s = s:reverse():gsub("(%d%d%d)", "%1,")
@@ -1707,6 +1709,7 @@ local function processLemon(v, hrp)
     end)
 
     local collected = not (v and v.Parent and v:IsDescendantOf(Workspace))
+    pcall_(function() if v then _lemonPending[v] = true end end)  -- count it for real in the worker once it vanishes
 
     if hitboxApplied and not collected then
         pcall_(function()
@@ -1783,7 +1786,6 @@ local function processSnapshot(snapshot, hrp)
                     if ok then
                         lemonFailCount[lk] = nil
                         collectedCount = collectedCount + 1
-                        STATS.lemons = STATS.lemons + 1
                     else
                         lemonFailCount[lk] = fails + 1
                     end
@@ -1879,19 +1881,19 @@ _wrap("lemon-farm", function()
                     end
                     local fp = _camFirstPerson(hA)
                     if fp ~= nil then LSM.zoomedIn = fp end
+                    -- orient runs ONLY on entering first-person now (it used to re-run every 3s, so the camera
+                    -- kept snapping up during farming). processLemon aims at each lemon afterwards.
+                    pcall_(function()
+                        if hA then
+                            camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
+                        end
+                    end)
+                    pcall_(function()
+                        if type(mousemoverel) == "function" and _windowFocused() and _camFirstPerson(hA) ~= false then
+                            for _ = 1, 6 do mousemoverel(0, -250); LSM.lastBot = tick_(); task_wait(0.02) end
+                        end
+                    end)
                 end
-                pcall_(function()
-                    if hA then
-                        camera.lookAt(hA.Position, hA.Position + Vec3(0, 12, 3))
-                    end
-                end)
-
-                pcall_(function()
-                    if type(mousemoverel) == "function" and _windowFocused() and _camFirstPerson(hA) ~= false then
-                        for _ = 1, 6 do mousemoverel(0, -250); LSM.lastBot = tick_(); task_wait(0.02) end
-                    end
-                end)
-            end
             lemonFailCount = {}
 
             local pass            = 0
@@ -1919,6 +1921,13 @@ _wrap("lemon-farm", function()
                 if not hrp then break end
 
                 processSnapshot(snapshot, hrp)
+                -- tally lemons that actually vanished (the click's collect replicates a beat after
+                -- processLemon's instant check, so we count confirmed-gone lemons here)
+                for lv in pairs(_lemonPending) do
+                    if not (lv and lv.Parent and lv:IsDescendantOf(Workspace)) then
+                        STATS.lemons = STATS.lemons + 1; _lemonPending[lv] = nil
+                    end
+                end
 
                 task_wait(LEMON_PASS_WAIT)
             end
