@@ -441,6 +441,37 @@ end
 
 local RB = { mult = 2, lastPeek = 0, lastReb = 0, goSince = 0, peekEvery = 60, go = false, status = "off" }
 
+-- ── Session stats. Declared HERE (before the menu) so the live :Label closures can capture STATS; the farm
+-- loops below write into it. Buttons live in STATS.bought (was the old `STATS.bought`). ──
+local STATS = { bought = 0, deals = 0, lemons = 0, bags = 0, rebirths = 0 }
+local statsStartT = tick_()
+local _bagSeen = {}
+pcall_(function() setmetatable(_bagSeen, { __mode = "k" }) end)   -- weak: counts each cash bag once, no leak
+local function fmtN(n)
+    local s = tostring_(mfloor(tonumber(n) or 0))
+    s = s:reverse():gsub("(%d%d%d)", "%1,")
+    s = s:reverse()
+    return (s:gsub("^,", ""))
+end
+local function fmtClock(sec)
+    sec = mfloor(sec or 0)
+    local h, m, s = mfloor(sec / 3600), mfloor((sec % 3600) / 60), sec % 60
+    if h > 0 then return sformat("%d:%02d:%02d", h, m, s) end
+    return sformat("%d:%02d", m, s)
+end
+local _cashCache = { t = -1, v = nil }
+local function readCashText()   -- the live $balance text from the game HUD; cached 0.5s (per-frame DOM walk is costly)
+    local now = tick_()
+    if _cashCache.t >= 0 and (now - _cashCache.t) < 0.5 then return _cashCache.v end
+    _cashCache.t = now
+    local pg = player and player:FindFirstChild("PlayerGui")
+    local hud = pg and pg:FindFirstChild("HUD")
+    if not hud then _cashCache.v = nil; return nil end
+    local t; pcall_(function() t = RB.text(RB.node(hud, "Balance/Main/Cash")) end)
+    _cashCache.v = (type(t) == "string" and t ~= "") and t or nil
+    return _cashCache.v
+end
+
 pcall_(function()
     if type(readfile) ~= "function" then return end
     local saved = tonumber(readfile("selllemons_mini.txt"))
@@ -806,6 +837,16 @@ if Lib then
         end
     end):AddKeybind("6", "Toggle"):SetRisk()
 
+    local stat = tab1:Section("Session", "Right", "live stats this session")
+    stat:Label(function() return "Runtime:  " .. fmtClock(tick_() - statsStartT) end)
+    stat:Label(function() return "Cash:  " .. (readCashText() or "...") end)
+    stat:Divider()
+    stat:Label(function() return "Buttons bought:  " .. fmtN(STATS.bought) end)
+    stat:Label(function() return "Lemons collected:  " .. fmtN(STATS.lemons) end)
+    stat:Label(function() return "Cash bags:  " .. fmtN(STATS.bags) end)
+    stat:Label(function() return "Deals accepted:  " .. fmtN(STATS.deals) end)
+    stat:Label(function() return "Rebirths:  " .. fmtN(STATS.rebirths) end)
+
     window:AddSettingsTab("cog")
 
     -- floating status HUD, built on the lib's CreateBox: Stat = "label | value" + auto status dot, Bar = rebirth %
@@ -1087,7 +1128,6 @@ end)
 local localQueue   = {}
 local queueIndex   = 1
 local queueLock    = false
-local totalBought  = 0
 local totalFailed  = 0
 local lastResetTime = 0
 
@@ -1352,8 +1392,8 @@ _wrap("autobuy-worker", function()
                 if tpTouchBuy(hrp, btn) then
                     buyCooldown[btn] = nil
                     didBuy = true
-                    totalBought = totalBought + 1
-                    print("[Buy] " .. tostring(key) .. " | Total: " .. totalBought)
+                    STATS.bought = STATS.bought + 1
+                    print("[Buy] " .. tostring(key) .. " | Total: " .. STATS.bought)
                 else
                     buyCooldown[btn] = tick_() + BUY_RETRY   -- can't buy now; retry in ~2s once cash builds
                     totalFailed = totalFailed + 1
@@ -1741,6 +1781,7 @@ local function processSnapshot(snapshot, hrp)
                     if ok then
                         lemonFailCount[lk] = nil
                         collectedCount = collectedCount + 1
+                        STATS.lemons = STATS.lemons + 1
                     else
                         lemonFailCount[lk] = fails + 1
                     end
@@ -1767,8 +1808,8 @@ _wrap("lemon-farm", function()
         local afkNow = (tick_() - (S.lastUser or 0)) >= CFG.afkDelay
 
         if buyBusy and afkNow then
-            if totalBought ~= LSM.lastBoughtN then
-                LSM.lastBoughtN = totalBought
+            if STATS.bought ~= LSM.lastBoughtN then
+                LSM.lastBoughtN = STATS.bought
                 LSM.buyProgressT = tick_()
             end
             if not LSM.buyProgressT then LSM.buyProgressT = tick_() end
@@ -1776,7 +1817,7 @@ _wrap("lemon-farm", function()
             if (tick_() - LSM.buyProgressT) > CFG.buyStuck and (tick_() - (LSM.buySweepT or 0)) >= 4 then LSM.lemonSlot = true end
         else
             LSM.buyProgressT = nil
-            LSM.lastBoughtN = totalBought
+            LSM.lastBoughtN = STATS.bought
         end
         if not (lemonFarmActive and autoBuyActive) then LSM.lemonSlot = false end
         if lemonFarmActive and LSM.annAfk ~= afkNow then
@@ -1905,7 +1946,7 @@ _wrap("lemon-farm", function()
             if LSM.lemonSlot then
                 LSM.lemonSlot = false
                 LSM.buyProgressT = tick_()
-                LSM.lastBoughtN = totalBought
+                LSM.lastBoughtN = STATS.bought
             end
             task_wait(0.1)
         else
@@ -1931,6 +1972,7 @@ _wrap("cash-farm", function()
                 local parent = snapshot[i]
                 if parent and parent.Parent then
                     pcall_(function() parent.Position = headPos end)
+                    if not _bagSeen[parent] then _bagSeen[parent] = true; STATS.bags = STATS.bags + 1 end
                 end
             end
             task_wait(CFG.slow and 0.6 or 0.3)
@@ -2546,6 +2588,7 @@ _wrap("auto-deal", function()
                     end
                 end
                 print("[Deal] accepted: " .. btnText(best))
+                STATS.deals = STATS.deals + 1
                 task_wait(1)
             end)
         end
@@ -2994,6 +3037,7 @@ function RB.confirmRebirth(cf)
     end
     if done then
         RB.lastReb = tick_(); RB.lastPeek = tick_(); RB.goSince = 0; RB.go = false
+        STATS.rebirths = STATS.rebirths + 1
         RB.goN = 0; RB.sideLog = nil
         RB.earnLog = nil; RB.lastCashLog = nil; RB.spentEstT = tick_()
 
