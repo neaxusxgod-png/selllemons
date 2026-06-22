@@ -1205,7 +1205,7 @@ local function _anyBuyableNowButtons()
     if (tick_() % 25) < 5 then return false end
     return _anyLiveButtons()
 end
-local function _autobuyHasWork() return (#localQueue - queueIndex + 1) > 0 end
+local function _autobuyHasWork() return _anyLiveButtons() end  -- stateless: live scan, not the (now-unused) queue
 local STAND_E_SPAM_DURATION = 3.0
 
 local function runLocationsPass(firstRun)
@@ -1265,156 +1265,98 @@ local function runLocationsPass(firstRun)
     return "done"
 end
 
+-- ============================================================================
+-- STATELESS auto-buy. Every pass re-scans the LIVE buttons and TP-touches any
+-- that is buyable right now. There is no persistent queue / blacklist / backoff
+-- / decor-memo, so nothing can wedge across passes - a button that was skipped
+-- (unaffordable, busy, far) is re-evaluated from scratch next pass. This removes
+-- the whole class of "one button stays skipped until a full restart" bugs that
+-- the old queue + two-worker + blacklist machinery could produce.
+-- ============================================================================
+
+-- live decor test (no memo: a stale decorFolderMemo key was a permanent-skip risk)
+local function isDecorLive(btn)
+    if not btn then return false end
+    local inDecor = false
+    pcall_(function()
+        local cur, prev = btn.Parent, nil
+        for _ = 1, 8 do
+            if not cur then break end
+            local nm = tostring_(cur.Name)
+            if nm == "Buttons" then if prev == "Decor" then inDecor = true end return end
+            prev = nm; cur = cur.Parent
+        end
+    end)
+    if inDecor then return true end
+    local red = false
+    pcall_(function()
+        local c = btn.Color
+        if c then local r, g, b = normalizeColor(c); if r >= 140 and g <= 75 and b <= 75 then red = true end end
+    end)
+    return red
+end
+
+-- TP onto the button so the character touches it; poll until it disappears.
+-- Touch -> server removes the button -> replicates back = a network round-trip;
+-- the deadline is generous so a slow PC / high ping still registers before timeout.
+local function tpTouchBuy(hrp, btn)
+    local pos = btn.Position
+    local px, py, pz = pos.X, pos.Y, pos.Z
+    LSM.lastBot = tick_(); LSM.buySweepT = tick_()
+    pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
+    task_wait(0.03)
+    local deadline = tick_() + 0.5
+    repeat
+        pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
+        LSM.lastBot = tick_(); LSM.buySweepT = tick_()
+        task_wait(0.03)
+        local gone = false
+        pcall_(function() gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon)) end)
+        if gone then return true end
+    until tick_() >= deadline
+    return false
+end
+
 _wrap("autobuy-worker", function()
-    local emptyStreak = 0
-    local _prevAB = false
     while ScriptActive do
         syncFromUI()
-        if autoBuyActive and not _prevAB then
-            -- Re-enabling Auto Buy fully resets the skip-state (backoff timers / queue / blacklist) so toggling
-            -- it off and on recovers a button that got stuck-skipped, instead of needing a full script restart.
-            resetBuyBlacklist(); localQueue = {}; queueIndex = 1
-        end
-        _prevAB = autoBuyActive
-        if not autoBuyActive then task_wait(0.05); continue end
-
+        if not autoBuyActive then task_wait(0.1); continue end
         if _standIsTapping or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy()
            or (autoRebirthActive and RB.wantSlot) then task_wait(0.05); continue end
 
         local character = player.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        if not hrp or not myTycoon then task_wait(0.05); continue end
+        if not hrp then task_wait(0.1); continue end
 
-        local item = nil
-        local lq = localQueue
-        while queueIndex <= #lq do
-            local candidate = lq[queueIndex]
-            queueIndex = queueIndex + 1
-            if candidate and candidate.btn and candidate.btn.Parent then
-                local key = candidate.key
-                if buyReady(key, candidate.btn) and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
-                   and not (skipDecorActive and _isDecorBtn(candidate.btn, key)) then
-                    item = candidate; break
+        local buttons = getButtonsRealTime()   -- self-finds myTycoon, cached 0.12s; always the LIVE set
+        lastButtonCount = #buttons
+        local didBuy = false
+        for _, btn in ipairs_(buttons) do
+            if not autoBuyActive then break end
+            -- yield to stand / rebirth / minigame mid-pass so auto-buy doesn't fight them for the character
+            if _standIsTapping or (autoRebirthActive and RB.wantSlot) or MG.lemBusy() then break end
+            local live = false
+            pcall_(function() live = btn and btn.Parent and (not myTycoon or btn:IsDescendantOf(myTycoon)) end)
+            if live and not isGreyedOut(btn) and not (skipDecorActive and isDecorLive(btn)) then
+                local key = getButtonKey(btn)
+                if tpTouchBuy(hrp, btn) then
+                    didBuy = true
+                    totalBought = totalBought + 1
+                    print("[Buy] " .. tostring(key) .. " | Total: " .. totalBought)
+                else
+                    totalFailed = totalFailed + 1
                 end
             end
         end
-
-        if not item then
-            local remaining = #lq - queueIndex + 1
-            if remaining <= 0 then
-                local added = appendNewButtons()
-                if added > 0 then
-                    lq = localQueue
-                    while queueIndex <= #lq do
-                        local candidate = lq[queueIndex]
-                        queueIndex = queueIndex + 1
-                        if candidate and candidate.btn and candidate.btn.Parent then
-                            local key = candidate.key
-                            if buyReady(key, candidate.btn) and not isGreyedOut(candidate.btn) and not buyBlacklist[key]
-                               and not (skipDecorActive and _isDecorBtn(candidate.btn, key)) then
-                                item = candidate; break
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if not item then
-
-            LSM.buySweepT = 0
-            if allButtonsDead() then
-                local now = tick_()
-                if now - lastResetTime > 10 then
-                    lastResetTime = now
-                    resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
-                end
-            else
-                emptyStreak = emptyStreak + 1
-                if emptyStreak > 10 then emptyStreak = 0; appendNewButtons() end
-            end
-            task_wait(0.05); continue
-        end
-
-        emptyStreak = 0
-
-        local key = item.key
-        local btn = item.btn
-        local pos = btn.Position
-        local px, py, pz = pos.X, pos.Y, pos.Z
-        LSM.lastBot = tick_(); LSM.buySweepT = tick_()
-        pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
-        task_wait(0.03)
-        -- Stand ON the button and poll until it disappears. Touch -> server removes the button -> it
-        -- replicates back to us = a network round-trip (~0.1-0.3s). The old code checked once after a fixed
-        -- 0.07s, which was too fast, so real buys got counted as fails -> backoff -> 20s lockout -> skips.
-        local bought = false
-        local deadline = tick_() + 0.5   -- generous so a slow PC / high ping still registers the buy before it counts a fail
-        repeat
-            pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
-            LSM.lastBot = tick_(); LSM.buySweepT = tick_()
-            task_wait(0.03)
-            local exists = false
-            pcall_(function() exists = btn and btn.Parent and btn:IsDescendantOf(myTycoon) end)
-            if not exists then bought = true; break end
-        until tick_() >= deadline
-        if bought then
-            -- No permanent buyBlacklist: a button that respawns at the same spot (e.g. after a rebirth) keeps
-            -- the same position-key and must stay buyable. The bought instance has Parent=nil, so the queue
-            -- scan skips it on its own without us blacklisting the key forever.
-            buyAttempt[key]    = nil
-            failedButtons[key] = nil
-            totalBought = totalBought + 1
-            print("[Buy] " .. key .. " | Total: " .. totalBought)
-        else
-            markBuyFail(key, btn)
-            totalFailed = totalFailed + 1
-        end
-
-        if totalBought % 20 == 0 then cleanupQueue() end
+        task_wait(didBuy and 0.02 or 0.15)
     end
 end)
 
 _wrap("autobuy-coord", function()
+    -- keep myTycoon fresh during idle/closed-menu periods (getButtonsRealTime also self-heals it)
     while ScriptActive do
-        syncFromUI()
-        if not autoBuyActive then task_wait(0.2); continue end
-        if _standIsTapping then task_wait(0.2); continue end
-
-        if not myTycoon or not myTycoon.Parent then
-            myTycoon = findMyTycoon()
-            if myTycoon then
-                resetBuyBlacklist(); localQueue = {}; queueIndex = 1; buildButtonsCache()
-            else
-                task_wait(0.5); continue
-            end
-        end
-
-        local remaining = #localQueue - queueIndex + 1
-        if remaining == 0 then
-            local added = appendNewButtons()
-            if added > 0 then
-                task_wait(0.05)
-            elseif allButtonsDead() then
-                local now = tick_()
-                if now - lastResetTime > 10 then
-                    lastResetTime = now
-                    resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
-                    task_wait(0.05)
-                else
-                    task_wait(0.5)
-                end
-            else
-                if tick_() - lastResetTime > 60 then
-                    lastResetTime = tick_()
-                    resetBuyBlacklist(); localQueue = {}; queueIndex = 1; appendNewButtons()
-                end
-                task_wait(0.3)
-            end
-            continue
-        end
-
-        task_wait(0.3)
+        if not myTycoon or not myTycoon.Parent then myTycoon = findMyTycoon() or myTycoon end
+        task_wait(0.5)
     end
 end)
 
