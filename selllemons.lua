@@ -3345,6 +3345,26 @@ _wrap("auto-rebirth", function()
     end
 end)
 
+-- The "Are you sure you want to evolve?" alert lives in Important/Alert/Main/Buttons (same template as the
+-- rebirth confirm). The LEFTMOST button there is EVOLVE! (confirm); nvm is right of it; FREE is elsewhere
+-- (Alert/Main/Sale). Accept TextButton OR ImageButton in case the buttons are images.
+local function findEvolveConfirm()
+    local pg = getPlayerGui(); if not pg then return nil end
+    local box = RB.node(pg, "Important/Alert/Main/Buttons")
+    if not box then return nil end
+    local best, bx
+    pcall_(function()
+        for _, d in ipairs_(box:GetChildren()) do
+            local cls = tostring_(d.ClassName)
+            if cls == "TextButton" or cls == "ImageButton" then
+                local ap; pcall_(function() ap = d.AbsolutePosition end)
+                if ap and (ap.X > 1 or ap.Y > 1) and (not bx or ap.X < bx) then bx = ap.X; best = d end
+            end
+        end
+    end)
+    return best
+end
+
 -- Auto Evolve: same idea as rebirth but simple - EvolutionMenu/Body/Progress shows "NN%", and the
 -- Evolve button (EvolutionMenu/Body/Evolve) is pressable at 100%. Reuse RB's GUI helpers.
 _wrap("auto-evolve", function()
@@ -3362,8 +3382,15 @@ _wrap("auto-evolve", function()
             if side then RB.click(side); task_wait(0.3) end         -- open the Evolution menu
             local btn = RB.node(RB.gui(), "EvolutionMenu/Body/Evolve")
             if btn and RB.click(btn) then
-                STATS.evolves = STATS.evolves + 1
-                print("[Evolve] pressed Evolve (progress " .. pct .. "%)")
+                task_wait(0.4)
+                local cf                                            -- confirm "Are you sure?" -> EVOLVE! (not nvm/FREE)
+                for _ = 1, 10 do cf = findEvolveConfirm(); if cf then break end; task_wait(0.15) end
+                if cf and RB.click(cf) then
+                    STATS.evolves = STATS.evolves + 1
+                    print("[Evolve] evolved (confirmed); progress was " .. pct .. "%")
+                else
+                    print("[Evolve] pressed Evolve but no confirm button appeared")
+                end
             end
             task_wait(2.5)                                          -- let it apply + progress reset
         else
