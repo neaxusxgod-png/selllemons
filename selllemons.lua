@@ -1894,6 +1894,7 @@ _wrap("lemon-farm", function()
                         end
                     end)
                 end
+            end
             lemonFailCount = {}
 
             local pass            = 0
