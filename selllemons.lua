@@ -677,6 +677,7 @@ if Lib then
         autoBuyActive = val
         if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
         else pcall_(function() localQueue = {}; queueIndex = 1 end) end
+        pcall_(function() if Lib and Lib.SetPerformance then Lib:SetPerformance(val) end end)   -- lite GUI (60fps, no glow) while auto-buying frees the single Lua thread -> no freeze/lag
         S.saveState()
     end):AddKeybind("1", "Toggle")
     UIRef.t.SkipDecor = buyL:Toggle("Skip Decor", false, function(val)
