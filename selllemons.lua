@@ -690,6 +690,7 @@ if Lib then
     UIRef.t.AfkDelay = collectL:Slider("AFK delay", CFG.afkDelay or 6, 1, 1, 30, "s", function(val)
         local s = mfloor(tonumber_(val) or 6); if s < 1 then s = 1 elseif s > 30 then s = 30 end; CFG.afkDelay = s
     end)
+    collectL:Divider()
     UIRef.t.AutoStand = collectL:Toggle("Auto Stand", false, function(val)
         autoStandActive = val; S.saveState()
     end):AddKeybind("3", "Toggle")
@@ -721,6 +722,7 @@ if Lib then
     UIRef.t.CashVine = autoR:Toggle("Cash Vine TP", false, function(val)
         if val then CFG.vineGo = true else CFG.vineBack = true end
     end)
+    autoR:Divider("Visuals")
     UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
         keyEspActive = val; S.saveState()
     end)
@@ -2396,7 +2398,7 @@ local function pollInput()
         S.stHide(statusTx3, 3)
     end
 
-    local mgName = MG.name()
+    local mgName = MG.active and MG.name() or nil   -- HUD minigame row only while Auto Minigame is enabled
     if mgName then
         local cd = MG.timerSec()
         if cd and cd > 0 then MG.miniEnd = tick_() + cd; MG.saveMiniEnd() end
