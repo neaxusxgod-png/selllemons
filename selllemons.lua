@@ -49,49 +49,6 @@ setrobloxinput(true)
 local mouse = nil
 pcall_(function() mouse = player:GetMouse() end)
 
--- ── Pointer auto-calibration ──────────────────────────────────────────────────────────────────────────
--- mousemoveabs() takes OS SCREEN pixels, but GUI AbsolutePosition is in Roblox VIEWPORT pixels. Under Windows
--- display-scaling (125%/150%) or windowed mode these diverge, so every GUI auto-click (rebirth/evolve/deal)
--- lands OFF. We measure the viewport->screen map ONCE (move the OS cursor to 2 points, read the game's mouse
--- position) and apply it to EVERY mousemoveabs. On 100% fullscreen the map is identity, so nothing changes.
--- If it can't measure (unfocused / no GetMouseLocation), it stays identity = exactly the old behaviour.
-local _rawMMA = mousemoveabs
-local _ptr, _ptrTries = nil, 0
-local function _ptrFocused()
-    if type(isrbxactive) ~= "function" then return true end
-    local ok, r = pcall(isrbxactive); return (not ok) or (r ~= false)
-end
-local function _calibratePtr()
-    if not _ptrFocused() then return nil end
-    local UIS = game:GetService("UserInputService")
-    local function meas(sx, sy)
-        pcall(function() _rawMMA(sx, sy) end)
-        task_wait(0.05)
-        local v; pcall(function() v = UIS:GetMouseLocation() end)
-        return v
-    end
-    local v1 = meas(240, 240)
-    local v2 = meas(720, 560)
-    if not (v1 and v2) then return nil end
-    local dvx, dvy = (v2.X - v1.X), (v2.Y - v1.Y)
-    if math.abs(dvx) < 2 or math.abs(dvy) < 2 then return nil end
-    local sx, sy = (720 - 240) / dvx, (560 - 240) / dvy
-    if sx < 0.3 or sx > 4 or sy < 0.3 or sy > 4 then return { sx = 1, sy = 1, ox = 0, oy = 0 } end  -- sanity -> identity
-    return { sx = sx, sy = sy, ox = 240 - v1.X * sx, oy = 240 - v1.Y * sy }
-end
-local function mousemoveabs(x, y)   -- shadows the global: viewport coords in -> calibrated screen coords out
-    if not _ptr then
-        _ptrTries = _ptrTries + 1
-        local p = _calibratePtr()
-        if p then _ptr = p; if p.sx ~= 1 or p.sy ~= 1 then print("[Calib] pointer scale x" .. sformat("%.3f", p.sx) .. " y" .. sformat("%.3f", p.sy)) end
-        elseif _ptrTries >= 6 then _ptr = { sx = 1, sy = 1, ox = 0, oy = 0 } end
-    end
-    local p = _ptr
-    if p then return _rawMMA(p.ox + x * p.sx, p.oy + y * p.sy) end
-    return _rawMMA(x, y)   -- identity until calibrated
-end
--- ──────────────────────────────────────────────────────────────────────────────────────────────────────
-
 local errCounts = {}
 local function reportErr(tag, err)
     local msg = "[" .. tag .. "] " .. tostring_(err)
