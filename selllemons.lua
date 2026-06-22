@@ -83,6 +83,12 @@ local buyBlacklist    = {}
 local failedButtons   = {}
 local buyAttempt      = {}
 
+-- short, self-clearing per-button buy cooldown, weak-keyed by INSTANCE so it can't wedge (GC'd on buy, fresh
+-- instance on respawn, timestamp always expires). Used by the stateless autobuy worker AND _anyLiveButtons.
+local buyCooldown = {}
+pcall_(function() setmetatable(buyCooldown, { __mode = "k" }) end)
+local BUY_RETRY = 2.0
+
 local keyMemo = {}
 pcall_(function() setmetatable(keyMemo, { __mode = "k" }) end)
 local function getButtonKey(v)
@@ -1192,7 +1198,9 @@ local function _anyLiveButtons()
     for _, v in ipairs_(buttons) do
         local key = getButtonKey(v)
         if key then
-            if buyReady(key, v) and not buyBlacklist[key] and not isGreyedOut(v)
+            -- "work" = a button we could actually buy now: live, not greyed/unaffordable, not on cooldown.
+            -- (cooldown-aware so the lemon farm doesn't keep pausing for a button auto-buy has shelved)
+            if not (buyCooldown[v] and tick_() < buyCooldown[v]) and not isGreyedOut(v)
                and not (skipDecorActive and _isDecorBtn(v, key)) then live = true; break end
         end
     end
@@ -1316,13 +1324,6 @@ local function tpTouchBuy(hrp, btn)
     until tick_() >= deadline
     return false
 end
-
--- Short, self-clearing per-button cooldown, weak-keyed by INSTANCE so it can NEVER wedge: a bought/destroyed
--- button is GC'd out of the table, a respawned button is a fresh instance with no cooldown, and the timestamp
--- always expires. A button we can't buy right now (not enough cash, or isGreyedOut missed it) gets a brief
--- cooldown so we don't waste a 0.5s TP-touch on it every pass - it's retried a couple seconds later as cash builds.
-local buyCooldown = setmetatable({}, { __mode = "k" })
-local BUY_RETRY = 2.0
 
 _wrap("autobuy-worker", function()
     while ScriptActive do
