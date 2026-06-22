@@ -672,7 +672,7 @@ if Lib then
 
     local tab1 = window:Tab("Main", "gauge")
 
-    local buyL = tab1:Section("Buying", "Left")
+    local buyL = tab1:Section("Buying", "Left", "auto-buy tycoon buttons")
     UIRef.t.AutoBuy = buyL:Toggle("Auto Buy", false, function(val)
         autoBuyActive = val
         if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
@@ -683,7 +683,7 @@ if Lib then
         skipDecorActive = val; S.saveState()
     end):Tooltip("skip decoration buttons while auto-buying")
 
-    local collectL = tab1:Section("Collecting", "Left")
+    local collectL = tab1:Section("Collecting", "Left", "lemons · stands · cash bags")
     UIRef.t.LemonFarm = collectL:Toggle("Lemon Farm", false, function(val)
         lemonFarmActive = val; S.saveState()
     end):AddKeybind("2", "Toggle")
@@ -697,7 +697,7 @@ if Lib then
         cashFarmActive = val; S.saveState()
     end):AddKeybind("4", "Toggle")
 
-    local rebL = tab1:Section("Rebirth", "Left")
+    local rebL = tab1:Section("Rebirth", "Left", "auto-rebirth at a target")
     UIRef.t.AutoRebirth = rebL:Toggle("Auto Rebirth", false, function(val)
         autoRebirthActive = val
         if val then
@@ -711,7 +711,7 @@ if Lib then
         local m = tonumber_(val) or 25; if m < 0.001 then m = 0.001 elseif m > 10000 then m = 10000 end; RB.gainPct = m
     end)
 
-    local autoR = tab1:Section("Automation", "Right")
+    local autoR = tab1:Section("Automation", "Right", "deals · minigames · vine")
     UIRef.t.AutoDeal = autoR:Toggle("Auto Deal", true, function(val)
         autoDealActive = val; S.saveState()
     end)
@@ -725,7 +725,7 @@ if Lib then
         keyEspActive = val; S.saveState()
     end)
 
-    local tgtR = tab1:Section("Targets", "Right")
+    local tgtR = tab1:Section("Targets", "Right", "what the bot upgrades & plays")
     pcall_(function()
         local listed = {}
         for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
@@ -764,7 +764,7 @@ if Lib then
         end
     end)
 
-    local sysR = tab1:Section("System", "Right")
+    local sysR = tab1:Section("System", "Right", "performance & stop-all")
     UIRef.t.FpsSave = sysR:Toggle("FPS Save", false, function(val)
         CFG.slow = val and true or false
         if val then FX.apply() else FX.restore() end
