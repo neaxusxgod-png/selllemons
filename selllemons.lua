@@ -727,7 +727,7 @@ if Lib then
         title = "Sell Lemons",
         subtitle = "auto",
         size = Vec2(580, 542),
-        badge = "v22",
+        badge = "v23",
         menuKey = "q",
         gameInput = "always",   -- never grab game input: menu is click-through, so a VM Restart can't leave the game frozen
         logo = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f34b.png",
@@ -881,7 +881,7 @@ if Lib then
         sbox:Stat(function() return (S.slot and S.slot[6]) or "" end)   -- evolve line below the bar
     end
 
-    Lib:Notify("Sell Lemons", "v22  -  Q to toggle  -  by Inspecttor", 5)
+    Lib:Notify("Sell Lemons", "v23  -  Q to toggle  -  by Inspecttor", 5)
     print("[Hub] INS ui loaded")
 end
 
@@ -3865,5 +3865,5 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v22 loaded  |  by Inspecttor")
+rprint("sell lemons v23 loaded  |  by Inspecttor")
 
