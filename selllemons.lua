@@ -908,12 +908,13 @@ if Lib then
         local vx = 1920; pcall_(function() vx = camera.ViewportSize.X end)
         local sbox = Lib:CreateBox({ title = "Sell Lemons", position = Vec2(vx - 306, 50), width = 288 })
         UIRef.statusBox = sbox
-        for i = 1, 6 do sbox:Stat(function() return (S.slot and S.slot[i]) or "" end) end
-        sbox:Bar(function()
+        for i = 1, 5 do sbox:Stat(function() return (S.slot and S.slot[i]) or "" end) end
+        sbox:Bar(function()   -- rebirth bar goes right under the rebirth line (slot 5), not at the very bottom
             local gm = S.barGeom
             if not gm or (tick_() - (RB.checkStartT or 0)) < 30 then return nil end
             return gm.pct or 0
         end)
+        sbox:Stat(function() return (S.slot and S.slot[6]) or "" end)   -- evolve line below the bar
     end
 
     Lib:Notify("Sell Lemons", "v22  -  Q to toggle  -  by Inspecttor", 5)
@@ -1423,7 +1424,9 @@ _wrap("autobuy-worker", function()
     while ScriptActive do
         syncFromUI()
         if not autoBuyActive then task_wait(0.1); continue end
-        if _standIsTapping or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy()
+        -- auto-buy is TP-based, so it does NOT need to pause for rebirth/evolve GUI peeks (RB.busyT). It only
+        -- yields to the stand, a minigame, and the actual rebirth wanting its slot - so it runs alongside evolve.
+        if _standIsTapping or MG.lemBusy()
            or (autoRebirthActive and RB.wantSlot) then task_wait(0.05); continue end
 
         local character = player.Character
