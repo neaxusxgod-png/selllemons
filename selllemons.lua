@@ -192,6 +192,7 @@ end
 
 local CFG = {
     buyWindow = 0.45,
+    buySpeed  = "Mid",
     afkDelay  = 6,
     zoomTicks = 22,
     zoomStep  = 1,
@@ -744,6 +745,9 @@ if Lib then
         pcall_(function() if Lib and Lib.SetPerformance then Lib:SetPerformance(val) end end)   -- lite GUI (60fps, no glow) while auto-buying frees the single Lua thread -> no freeze/lag
         S.saveState()
     end):AddKeybind("1", "Toggle")
+    UIRef.t.BuySpeed = farm:Dropdown("Auto Buy speed", { CFG.buySpeed or "Mid" }, { "Low", "Mid", "High" }, false, function(v)
+        CFG.buySpeed = (v and v[1]) or "Mid"; S.saveState()
+    end, "Low = smoother on weak PCs, High = fastest (more load)")
     UIRef.t.SkipDecor = farm:Toggle("Skip Decor", false, function(val)
         skipDecorActive = val; S.saveState()
     end):Tooltip("skip decoration buttons while auto-buying")
@@ -1363,17 +1367,25 @@ end
 -- TP onto the button so the character touches it; poll until it disappears.
 -- Touch -> server removes the button -> replicates back = a network round-trip;
 -- the deadline is generous so a slow PC / high ping still registers before timeout.
+-- Auto Buy speed presets: gentler pacing = less single-thread hogging = smoother on weak PCs (but slower buying).
+local BUY_PACE = {
+    Low  = { poll = 0.06,  deadline = 0.55, passBusy = 0.06, passIdle = 0.30 },
+    Mid  = { poll = 0.03,  deadline = 0.50, passBusy = 0.02, passIdle = 0.15 },
+    High = { poll = 0.015, deadline = 0.40, passBusy = 0.0,  passIdle = 0.05 },
+}
+local function buyPace() return BUY_PACE[CFG.buySpeed] or BUY_PACE.Mid end
 local function tpTouchBuy(hrp, btn)
+    local pc = buyPace()
     local pos = btn.Position
     local px, py, pz = pos.X, pos.Y, pos.Z
     LSM.lastBot = tick_(); LSM.buySweepT = tick_()
     pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
-    task_wait(0.03)
-    local deadline = tick_() + 0.5
+    task_wait(pc.poll)
+    local deadline = tick_() + pc.deadline
     repeat
         pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
         LSM.lastBot = tick_(); LSM.buySweepT = tick_()
-        task_wait(0.03)
+        task_wait(pc.poll)
         local gone = false
         pcall_(function() gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon)) end)
         if gone then return true end
@@ -1418,7 +1430,7 @@ _wrap("autobuy-worker", function()
                 end
             end
         end
-        task_wait(didBuy and 0.02 or 0.15)
+        local _bp = buyPace(); task_wait(didBuy and _bp.passBusy or _bp.passIdle)
     end
 end)
 
