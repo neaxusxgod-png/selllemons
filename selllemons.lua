@@ -49,45 +49,6 @@ setrobloxinput(true)
 local mouse = nil
 pcall_(function() mouse = player:GetMouse() end)
 
--- ── Pointer scale calibration (SCALE ONLY, no offset) ───────────────────────────────────────────────────
--- Under Windows display-scaling (125%/150%) the Roblox viewport pixels (AbsolutePosition) and the OS pixels
--- (mousemoveabs) differ by the scale factor, so GUI auto-clicks miss. We measure ONLY the scale by moving the
--- OS cursor to 2 points and reading the game's mouse position; the GUI inset CANCELS in the ratio, and we add
--- NO offset (assumes fullscreen) - that was the bug last time. scale==1 on 100% => exact identity (no change).
-local _rawMMA = mousemoveabs
-local _ptr, _ptrTries = nil, 0
-local function _calibratePtr()
-    if type(isrbxactive) == "function" then local ok, r = pcall(isrbxactive); if ok and r == false then return nil end end
-    local UIS = game:GetService("UserInputService")
-    local function meas(sx, sy)
-        pcall(function() _rawMMA(sx, sy) end)
-        task_wait(0.05)
-        local v; pcall(function() v = UIS:GetMouseLocation() end)
-        return v
-    end
-    local v1 = meas(240, 240)
-    local v2 = meas(720, 560)
-    if not (v1 and v2) then return nil end
-    local dvx, dvy = (v2.X - v1.X), (v2.Y - v1.Y)
-    if math.abs(dvx) < 2 or math.abs(dvy) < 2 then return nil end
-    local sx, sy = (720 - 240) / dvx, (560 - 240) / dvy
-    if sx < 0.3 or sx > 4 or sy < 0.3 or sy > 4 then return { sx = 1, sy = 1 } end             -- garbage -> identity
-    if sx > 0.95 and sx < 1.05 and sy > 0.95 and sy < 1.05 then return { sx = 1, sy = 1 } end   -- ~100% -> exact identity
-    return { sx = sx, sy = sy }
-end
-local function mousemoveabs(x, y)
-    if not _ptr then
-        _ptrTries = _ptrTries + 1
-        local p = _calibratePtr()
-        if p then _ptr = p; if p.sx ~= 1 then print("[Calib] display scale -> click x" .. sformat("%.3f", p.sx)) end
-        elseif _ptrTries >= 8 then _ptr = { sx = 1, sy = 1 } end
-    end
-    local p = _ptr
-    if p and (p.sx ~= 1 or p.sy ~= 1) then return _rawMMA(x * p.sx, y * p.sy) end
-    return _rawMMA(x, y)   -- identity (100% / until calibrated)
-end
--- ────────────────────────────────────────────────────────────────────────────────────────────────────────
-
 local errCounts = {}
 local function reportErr(tag, err)
     local msg = "[" .. tag .. "] " .. tostring_(err)
