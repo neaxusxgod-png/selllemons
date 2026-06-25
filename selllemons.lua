@@ -182,6 +182,24 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
+-- Gamepass perks: write the power levels straight onto the tycoon's Powers.Permanent attributes -
+-- that's what actually makes the WalkSpeed / Click value / stack / buy-next / manage gamepasses active.
+local GAMEPASS_POWERS = { Manage = 1, WalkSpeed = 4, UpgradeStack = 4, BuyNext = 1, ClickFruitValue = 3 }
+local function unlockGamepasses()
+    if not (myTycoon and myTycoon.Parent) then myTycoon = findMyTycoon() or myTycoon end
+    local t = myTycoon
+    if not (t and t.Parent) then return false, "tycoon not found - stand on your plot, then retry" end
+    local perm
+    pcall_(function() perm = t.Values.Powers.Permanent end)
+    if not perm then return false, "powers node missing (game update?)" end
+    local n = 0
+    local ok = pcall_(function()
+        for power, value in pairs_(GAMEPASS_POWERS) do perm:SetAttribute(power, value); n = n + 1 end
+    end)
+    if not (ok and n > 0) then return false, "couldn't write perks" end
+    return true, "unlocked " .. n .. " gamepass perks"
+end
+
 local drawObjs = {}
 local function D(typ, props)
     local obj = Drawing.new(typ)
@@ -830,6 +848,10 @@ if Lib then
         end
     end)
     autoR:Button("Cash Vine TP", function() CFG.vineGo = true end)
+    autoR:Button("Unlock Gamepasses", function()
+        local ok, msg = unlockGamepasses()
+        Lib:Notify("Gamepasses", msg, 4, ok and "success" or "warning")
+    end):Tooltip("apply your gamepass perks (walkspeed, click value, stacks) to your plot")
     autoR:Divider("Visuals")
     UIRef.t.KeyEsp = autoR:Toggle("Key / Lever ESP", false, function(val)
         keyEspActive = val; S.saveState()
