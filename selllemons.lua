@@ -1,4 +1,3 @@
-
 if _G.MatchaCleanup then pcall(_G.MatchaCleanup) end
 local ScriptActive = true
 
@@ -77,77 +76,16 @@ local autoStandActive  = false
 local autoDealActive   = true
 local autoRebirthActive = false
 local autoEvolveActive  = false
-local evolveProgress    = 0      -- cached evolve % (worker writes, HUD reads) so the HUD doesn't walk the GUI each frame
+local autoAscendActive  = false
+local evolveProgress    = 0
 local keyEspActive      = false
 local _standIsTapping  = false
-
-local buyBlacklist    = {}
-local failedButtons   = {}
-local buyAttempt      = {}
-
--- short, self-clearing per-button buy cooldown, weak-keyed by INSTANCE so it can't wedge (GC'd on buy, fresh
--- instance on respawn, timestamp always expires). Used by the stateless autobuy worker AND _anyLiveButtons.
-local buyCooldown = {}
-pcall_(function() setmetatable(buyCooldown, { __mode = "k" }) end)
-local BUY_RETRY = 2.0
-
-local keyMemo = {}
-pcall_(function() setmetatable(keyMemo, { __mode = "k" }) end)
-local function getButtonKey(v)
-    if not v then return nil end
-    local k = keyMemo[v]
-    if k then return k end
-    local pos = v.Position
-    if not pos then return nil end
-    k = sformat("%d,%d,%d", mfloor(pos.X + 0.5), mfloor(pos.Y + 0.5), mfloor(pos.Z + 0.5))
-    keyMemo[v] = k
-    return k
-end
-
-local function resetBuyBlacklist()
-    buyBlacklist  = {}
-    failedButtons = {}
-    buyAttempt    = {}
-    print("[Hub] Blacklist RESET!")
-end
-
-local function buyReady(key, v)
-    local a = buyAttempt[key]
-    if not a then return true end
-    if v and a.inst and a.inst ~= v then
-        buyAttempt[key] = nil
-        return true
-    end
-
-    return tick_() >= a.next
-end
-local function markBuyFail(key, v)
-    local a = buyAttempt[key]
-    if not a then a = { n = 0, next = 0 }; buyAttempt[key] = a end
-    a.inst = v or a.inst
-    a.n = a.n + 1
-    -- gentle linear cooldown capped at 2s (was exponential up to a 20s lockout that skipped buttons you
-    -- could already afford a moment later, as cash keeps coming in)
-    local d = 0.5 + 0.25 * a.n
-    if d > 2 then d = 2 end
-    a.next = tick_() + d
-end
-
-local function isBlacklisted(key, v)
-    local bl = buyBlacklist[key]
-    if not bl then return false end
-    if v and bl ~= true and bl ~= v then
-        buyBlacklist[key] = nil
-        return false
-    end
-    return true
-end
 
 local myTycoon = nil
 local function findMyTycoon()
     local pname = player.Name
 
-    for _, tycoon in ipairs_(Workspace:GetChildren()) do
+for _, tycoon in ipairs_(Workspace:GetChildren()) do
         if tostring_(tycoon.Name):find("Tycoon") then
             local owner = tycoon:FindFirstChild("Owner")
             if owner then
@@ -157,7 +95,7 @@ local function findMyTycoon()
         end
     end
 
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     local hp; pcall_(function() hp = hrp and hrp.Position end)
     if hp then
         local best, bestD
@@ -182,8 +120,6 @@ local function findMyTycoon()
 end
 myTycoon = findMyTycoon()
 
--- Gamepass perks: write the power levels straight onto the tycoon's Powers.Permanent attributes -
--- that's what actually makes the WalkSpeed / Click value / stack / buy-next / manage gamepasses active.
 local GAMEPASS_POWERS = { Manage = 1, WalkSpeed = 4, UpgradeStack = 4, BuyNext = 1, ClickFruitValue = 3 }
 local function unlockGamepasses()
     if not (myTycoon and myTycoon.Parent) then myTycoon = findMyTycoon() or myTycoon end
@@ -210,7 +146,6 @@ end
 
 local CFG = {
     buyWindow = 0.45,
-    buySpeed  = "Mid",
     afkDelay  = 6,
     zoomTicks = 22,
     zoomStep  = 1,
@@ -246,7 +181,7 @@ pcall_(function()
             CFG.vineT = tick_() - (CFG.vineCd - rem)
         end
 
-    elseif saved <= tick_() and (tick_() - saved) < 7 * 24 * 3600 then
+elseif saved <= tick_() and (tick_() - saved) < 7 * 24 * 3600 then
         CFG.vineT = saved
     end
 end)
@@ -258,127 +193,10 @@ function UX.fire(id)
     return true
 end
 
-local FX = { on = false, mods = {}, n = 0 }
-local FX_PLASTIC; pcall_(function() FX_PLASTIC = Enum.Material.Plastic end)
-function FX.set(inst, prop, val)
-    pcall_(function()
-        local old = inst[prop]
-        if old == val then return end
-        inst[prop] = val
-        FX.n = FX.n + 1
-        FX.mods[FX.n] = { i = inst, p = prop, v = old }
-    end)
-end
-function FX.apply()
-    if FX.on then return end
-    FX.on = true
-    FX.gen = (FX.gen or 0) + 1
-    local gen = FX.gen
-    task_spawn(function()
-        pcall_(function()
-            local lt = game:GetService("Lighting")
-            FX.set(lt, "GlobalShadows", false)
-            FX.set(lt, "FogStart", 1e9)
-            FX.set(lt, "FogEnd", 1e9)
-            for _, e in ipairs_(lt:GetChildren()) do
-                local cn = tostring_(e.ClassName)
-                if cn == "BloomEffect" or cn == "BlurEffect" or cn == "SunRaysEffect"
-                   or cn == "ColorCorrectionEffect" or cn == "DepthOfFieldEffect" or cn == "Atmosphere" then
-                    if cn == "Atmosphere" then
-                        FX.set(e, "Density", 0)
-                    else
-                        FX.set(e, "Enabled", false)
-                    end
-                end
-            end
-        end)
-        pcall_(function()
-            local tr = Workspace:FindFirstChildOfClass("Terrain")
-            if tr then
-                FX.set(tr, "Decoration", false)
-                FX.set(tr, "WaterWaveSize", 0)
-                FX.set(tr, "WaterWaveSpeed", 0)
-                FX.set(tr, "WaterReflectance", 0)
-                FX.set(tr, "WaterTransparency", 1)
-                local cl; pcall_(function() cl = tr:FindFirstChildOfClass("Clouds") end)
-                if cl then FX.set(cl, "Cover", 0); FX.set(cl, "Density", 0) end
-            end
-        end)
-
-        local skipSet = {}
-        pcall_(function()
-            local ch = player.Character
-            if ch then
-                skipSet[ch] = true
-                for _, pp in ipairs_(ch:GetDescendants()) do skipSet[pp] = true end
-            end
-        end)
-        local desc
-        pcall_(function() desc = Workspace:GetDescendants() end)
-        if desc then
-            local i = 1
-            while i <= #desc and FX.on and FX.gen == gen and ScriptActive do
-                local ok = pcall_(function()
-                    local stop = i + 600
-                    while i <= #desc and i < stop do
-                        local d = desc[i]
-                        if not skipSet[d] then
-                            local cn = tostring_(d.ClassName)
-                            if cn == "ParticleEmitter" or cn == "Trail" or cn == "Beam"
-                               or cn == "Smoke" or cn == "Fire" or cn == "Sparkles" then
-                                FX.set(d, "Enabled", false)
-                            elseif cn == "Decal" or cn == "Texture" then
-                                FX.set(d, "Transparency", 1)
-                            else
-                                local isPart = false
-                                pcall_(function() isPart = d:IsA("BasePart") end)
-                                if isPart then
-                                    if FX_PLASTIC then FX.set(d, "Material", FX_PLASTIC) end
-                                    FX.set(d, "CastShadow", false)
-                                    FX.set(d, "Reflectance", 0)
-                                end
-                            end
-                        end
-                        i = i + 1
-                    end
-                end)
-                if not ok then i = i + 1 end
-                task_wait()
-            end
-        end
-        if FX.on and FX.gen == gen then print("[FPS] low graphics ON (" .. FX.n .. " changed)") end
-    end)
-end
-function FX.restore()
-    if not FX.on and FX.n == 0 then return end
-    FX.on = false
-    local mods, n = FX.mods, FX.n
-    FX.mods, FX.n = {}, 0
-
-    task_spawn(function()
-        local i = 1
-        while i <= n do
-            local ok = pcall_(function()
-                local stop = i + 400
-                while i <= n and i < stop do
-                    local m = mods[i]
-                    m.i[m.p] = m.v
-                    i = i + 1
-                end
-            end)
-            if not ok then i = i + 1 end
-            task_wait()
-        end
-        print("[FPS] graphics restored (" .. n .. ")")
-    end)
-end
-
 local Lib
 do
-    -- HttpGet can return a TRUNCATED body on a big file. Only run a body that downloaded fully (it ends with
-    -- the INSUI_FILE_END marker) - running a partial body can start a half-built render loop (flicker) or
-    -- return nil ("Lib nil"). Retry until we get a complete one; best-effort on the last body as a fallback.
-    local lastBody
+
+local lastBody
     for _ = 1, 8 do
         local body = nil
         pcall_(function() body = game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.min.lua") end)
@@ -410,6 +228,7 @@ local function syncToUI()
     pcall_(function() if UIRef.t.CashFarm  then UIRef.t.CashFarm:Set(cashFarmActive)   end end)
     pcall_(function() if UIRef.t.AutoRebirth then UIRef.t.AutoRebirth:Set(autoRebirthActive) end end)
     pcall_(function() if UIRef.t.AutoEvolve then UIRef.t.AutoEvolve:Set(autoEvolveActive) end end)
+    pcall_(function() if UIRef.t.AutoAscend then UIRef.t.AutoAscend:Set(autoAscendActive) end end)
     pcall_(function() if UIRef.t.AutoDeal  then UIRef.t.AutoDeal:Set(autoDealActive)   end end)
 end
 
@@ -418,11 +237,10 @@ local function stopAll(save)
     if save then
         S.stopSaved = {
             ab = autoBuyActive, lf = lemonFarmActive, cf = cashFarmActive,
-            as = autoStandActive, ar = autoRebirthActive, ad = autoDealActive, ae = autoEvolveActive,
+            as = autoStandActive, ar = autoRebirthActive, ad = autoDealActive, ae = autoEvolveActive, aa = autoAscendActive,
         }
         autoBuyActive, lemonFarmActive, cashFarmActive, autoStandActive, autoRebirthActive = false, false, false, false, false
-        autoDealActive = false; autoEvolveActive = false
-        resetBuyBlacklist()
+        autoDealActive = false; autoEvolveActive = false; autoAscendActive = false
         syncToUI()
         print("[Hub] Stop All ON - всё остановлено (состояние сохранено)")
     else
@@ -430,7 +248,7 @@ local function stopAll(save)
         if s then
             autoBuyActive, lemonFarmActive, cashFarmActive = s.ab, s.lf, s.cf
             autoStandActive, autoRebirthActive, autoDealActive = s.as, s.ar, s.ad
-            autoEvolveActive = s.ae
+            autoEvolveActive = s.ae; autoAscendActive = s.aa
             S.stopSaved = nil
         end
         syncToUI()
@@ -463,15 +281,14 @@ MG.lemBusy = function()
 end
 
 local RB = { mult = 2, lastPeek = 0, lastReb = 0, goSince = 0, peekEvery = 60, go = false, status = "off" }
+local ASC = { ready = false, busyT = 0 }
 
--- ── Session stats. Declared HERE (before the menu) so the live :Label closures can capture STATS; the farm
--- loops below write into it. Buttons live in STATS.bought (was the old `STATS.bought`). ──
-local STATS = { bought = 0, deals = 0, lemons = 0, bags = 0, rebirths = 0, evolves = 0 }
+local STATS = { bought = 0, deals = 0, lemons = 0, bags = 0, rebirths = 0, evolves = 0, ascends = 0 }
 local statsStartT = tick_()
 local _bagSeen = {}
-pcall_(function() setmetatable(_bagSeen, { __mode = "k" }) end)   -- weak: counts each cash bag once, no leak
+setmetatable(_bagSeen, { __mode = "k" })
 local _lemonPending = {}
-pcall_(function() setmetatable(_lemonPending, { __mode = "k" }) end)  -- lemons we clicked; tallied once they actually vanish
+setmetatable(_lemonPending, { __mode = "k" })
 local function fmtN(n)
     local s = tostring_(mfloor(tonumber(n) or 0))
     s = s:reverse():gsub("(%d%d%d)", "%1,")
@@ -484,11 +301,11 @@ local function fmtClock(sec)
     if h > 0 then return sformat("%d:%02d:%02d", h, m, s) end
     return sformat("%d:%02d", m, s)
 end
-local function fmtPct1(n)   -- percentage with up to 1 decimal, trailing ".0" stripped (0.1 -> "0.1", 50.0 -> "50")
+local function fmtPct1(n)
     return (sformat("%.1f", tonumber(n) or 0):gsub("%.0$", ""))
 end
 local _cashCache = { t = -1, v = nil }
-local function readCashText()   -- the live $balance text from the game HUD; cached 0.5s (per-frame DOM walk is costly)
+local function readCashText()
     local now = tick_()
     if _cashCache.t >= 0 and (now - _cashCache.t) < 0.5 then return _cashCache.v end
     _cashCache.t = now
@@ -536,7 +353,7 @@ MG.list = function()
         for _, c in ipairs_(mg:GetChildren()) do
             if c:IsA("Folder") or c:IsA("Model") then
 
-                local ok = false
+local ok = false
                 pcall_(function()
                     for _, d in ipairs_(c:GetDescendants()) do
                         if tostring_(d.ClassName) == "ProximityPrompt" then ok = true; break end
@@ -551,7 +368,7 @@ end
 
 MG.timerSec = function()
 
-    local now = tick_()
+local now = tick_()
     if MG.tsT and (now - MG.tsT) < 1.0 then return MG.tsVal end
     MG.tsT = now
     MG.tsVal = nil
@@ -565,22 +382,22 @@ MG.timerSec = function()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
 
-            if MG.enabled[nm] ~= false and nm:lower():find("minigame") and not nm:lower():find("trade") then
+if MG.enabled[nm] ~= false and nm:lower():find("minigame") and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "TextLabel" then
                         local t; pcall_(function() t = d.Text end)
                         t = tostring_(t or "")
 
-                        if (t:upper():gsub("[%s%p]", "")) == "READY" then
+if (t:upper():gsub("[%s%p]", "")) == "READY" then
                             if MG.shown(d) then ready = true end
                         else
                             local hh, mm, ss = t:match("^%s*(%d+):(%d%d):(%d%d)%s*$")
                             if hh then
                                 local r = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
 
-                                if r > 0 and r < 2 * 3600 then
+if r > 0 and r < 2 * 3600 then
 
-                                    local k; pcall_(function() k = d:GetFullName() end)
+local k; pcall_(function() k = d:GetFullName() end)
                                     k = k or nm
                                     local rec = MG.lblSeen[k]
                                     if not rec then
@@ -589,7 +406,7 @@ MG.timerSec = function()
                                     elseif rec.txt ~= t then
                                         rec.txt = t
 
-                                        rec.t = (now - rec.seen) <= 2.5 and now or 0
+rec.t = (now - rec.seen) <= 2.5 and now or 0
                                     end
                                     rec.seen = now
                                     if (now - rec.t) < 3 then rem = r end
@@ -602,7 +419,7 @@ MG.timerSec = function()
         end
     end)
 
-    if not rem and ready then
+if not rem and ready then
         MG.miniEnd = now
     end
     MG.tsVal = rem
@@ -621,7 +438,7 @@ MG.name = function()
                 for _, c in ipairs_(mg:GetChildren()) do
                     local cn = tostring_(c.Name)
 
-                    if MG.enabled[cn] ~= false and cn:lower():find("minigame") and not cn:lower():find("trade") then
+if MG.enabled[cn] ~= false and cn:lower():find("minigame") and not cn:lower():find("trade") then
                         for _, d in ipairs_(c:GetDescendants()) do
                             if tostring_(d.ClassName) == "ProximityPrompt" then
                                 local ot; pcall_(function() ot = d.ObjectText end)
@@ -691,7 +508,7 @@ local function getStandLocations()
         local rank = standRank(low)
         if rank < 99 and not low:find("ground") then
 
-            local pos = _standUpgradePos(folder, nm)
+local pos = _standUpgradePos(folder, nm)
             local lpos = nil
             if loc then
                 local lc = loc:FindFirstChild(nm)
@@ -736,40 +553,35 @@ end
 
 if Lib then
     Lib:SetTheme({
-        accentA = C3rgb(252, 211, 49),   -- lemon yellow
-        accentB = C3rgb(240, 165, 25),   -- golden amber
-        bg      = C3rgb(18, 17, 13),     -- warm dark
+        accentA = C3rgb(252, 211, 49),
+        accentB = C3rgb(240, 165, 25),
+        bg      = C3rgb(18, 17, 13),
         sidebar = C3rgb(18, 17, 13),
     })
     local window = Lib:CreateWindow({
         title = "Sell Lemons",
         subtitle = "auto",
         size = Vec2(580, 542),
-        badge = "v23",
+        badge = "v24",
         menuKey = "q",
-        gameInput = "always",   -- never grab game input: menu is click-through, so a VM Restart can't leave the game frozen
+        gameInput = "always",
         logo = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f34b.png",
     })
     UIRef.win = window
 
-    local tab1 = window:Tab("Main", "gauge")
+local tab1 = window:Tab("Main", "gauge")
 
-    -- one card with the main toggles (hotkeys 1-5); each chooser sits right under its toggle
-    local farm = tab1:Section("Farming", "Left", "auto-farms, stands & rebirth")
+local farm = tab1:Section("Farming", "Left", "auto-farms, stands & rebirth")
     UIRef.t.AutoBuy = farm:Toggle("Auto Buy", false, function(val)
         autoBuyActive = val
-        if val then pcall_(function() myTycoon = findMyTycoon(); buildButtonsCache(); localQueue = {}; queueIndex = 1 end)
-        else pcall_(function() localQueue = {}; queueIndex = 1 end) end
+        if val then pcall_(function() myTycoon = findMyTycoon() or myTycoon end) end
         S.saveState()
     end):AddKeybind("1", "Toggle")
-    UIRef.t.BuySpeed = farm:Dropdown("Auto Buy speed", { CFG.buySpeed or "Mid" }, { "Low", "Mid", "High" }, false, function(v)
-        CFG.buySpeed = (v and v[1]) or "Mid"; S.saveState()
-    end, "Low = smoother on weak PCs, High = fastest (more load)")
     UIRef.t.SkipDecor = farm:Toggle("Skip Decor", false, function(val)
         skipDecorActive = val; S.saveState()
     end):Tooltip("skip decoration buttons while auto-buying")
 
-    farm:Divider()
+farm:Divider()
     UIRef.t.LemonFarm = farm:Toggle("Lemon Farm", false, function(val)
         lemonFarmActive = val; S.saveState()
     end):AddKeybind("2", "Toggle")
@@ -777,23 +589,30 @@ if Lib then
         local s = mfloor(tonumber_(val) or 6); if s < 1 then s = 1 elseif s > 30 then s = 30 end; CFG.afkDelay = s
     end)
 
-    farm:Divider()
+farm:Divider()
     UIRef.t.AutoStand = farm:Toggle("Auto Stand", false, function(val)
         autoStandActive = val; S.saveState()
     end):AddKeybind("3", "Toggle")
-    pcall_(function()   -- stand chooser, right under Auto Stand
-        local listed = {}
-        for _, s in ipairs_(getStandLocations()) do listed[#listed + 1] = s.name end
-        if #listed == 0 then listed = STAND_NAMES end
-        local standSel = {}
-        for _, nm in ipairs_(listed) do
-            if standEnabled[nm] == nil then standEnabled[nm] = true end
-            if standEnabled[nm] ~= false then standSel[#standSel + 1] = nm end
+    pcall_(function()
+        local names = {}
+        for _, s in ipairs_(getStandLocations()) do names[#names + 1] = s.name end
+        if #names == 0 then names = STAND_NAMES end
+
+local labels, labelOf = {}, {}
+        for idx, nm in ipairs_(names) do
+            local lbl = idx .. ". " .. nm
+            labels[idx] = lbl
+            labelOf[lbl] = nm
         end
-        UIRef.standDd = farm:Dropdown("Active stands", standSel, listed, true, function(v)
+        local standSel = {}
+        for idx, nm in ipairs_(names) do
+            if standEnabled[nm] == nil then standEnabled[nm] = true end
+            if standEnabled[nm] ~= false then standSel[#standSel + 1] = labels[idx] end
+        end
+        UIRef.standDd = farm:Dropdown("Active stands", standSel, labels, true, function(v)
             local set = {}
-            for _, nm in ipairs_(v) do set[nm] = true end
-            for _, nm in ipairs_(listed) do standEnabled[nm] = set[nm] == true end
+            for _, lbl in ipairs_(v) do local nm = labelOf[lbl]; if nm then set[nm] = true end end
+            for _, nm in ipairs_(names) do standEnabled[nm] = set[nm] == true end
             S.saveState()
         end, "which stands the bot upgrades", true)
     end)
@@ -801,7 +620,7 @@ if Lib then
         cashFarmActive = val; S.saveState()
     end):AddKeybind("4", "Toggle")
 
-    farm:Divider()
+farm:Divider()
     UIRef.t.AutoRebirth = farm:Toggle("Auto Rebirth", false, function(val)
         autoRebirthActive = val
         if val then
@@ -817,15 +636,18 @@ if Lib then
     UIRef.t.AutoEvolve = farm:Toggle("Auto Evolve", false, function(val)
         autoEvolveActive = val; S.saveState()
     end):AddKeybind("6", "Toggle"):Tooltip("auto-presses Evolve when progress hits 100%")
+    UIRef.t.AutoAscend = farm:Toggle("Auto Ascend", false, function(val)
+        autoAscendActive = val; S.saveState()
+    end):AddKeybind("7", "Toggle"):Tooltip("ascends once EVERY upgrade is bought (takes priority over rebirth/evolve)")
 
-    local autoR = tab1:Section("Automation", "Right", "deals, minigames, vine")
+local autoR = tab1:Section("Automation", "Right", "deals, minigames, vine")
     UIRef.t.AutoDeal = autoR:Toggle("Auto Deal", true, function(val)
         autoDealActive = val; S.saveState()
     end)
     UIRef.t.AutoMini = autoR:Toggle("Auto Minigame", false, function(val)
         MG.active = val; if not val then MG.sessPost = 0 end; S.saveState()
     end)
-    pcall_(function()   -- minigame chooser, right under Auto Minigame
+    pcall_(function()
         local mgList = MG.list()
         local realMg = {}
         for _, nm in ipairs_(mgList) do
@@ -857,11 +679,7 @@ if Lib then
         keyEspActive = val; S.saveState()
     end)
 
-    local sysR = tab1:Section("System", "Right", "performance & stop-all")
-    UIRef.t.FpsSave = sysR:Toggle("FPS Save", false, function(val)
-        CFG.slow = val and true or false
-        if val then FX.apply() else FX.restore() end
-    end):Tooltip("strip graphics for weak PCs")
+local sysR = tab1:Section("System", "Right", "stop-all")
     UIRef.t.StopAll = sysR:Toggle("Stop All", false, function(val)
         if val then
             S.stopSavedMini = MG.active; MG.active = false
@@ -872,9 +690,9 @@ if Lib then
             pcall_(function() if UIRef.t.AutoMini then UIRef.t.AutoMini:Set(MG.active) end end)
             stopAll(false)
         end
-    end):AddKeybind("7", "Toggle"):SetRisk()
+    end):AddKeybind("8", "Toggle"):SetRisk()
 
-    local tabS = window:Tab("Session", "activity")
+local tabS = window:Tab("Session", "activity")
     local stOv = tabS:Section("Overview", "Left", "live stats this session")
     stOv:Label(function() return "Runtime:  " .. fmtClock(tick_() - statsStartT) end)
     stOv:Label(function() return "Cash:  " .. (readCashText() or "...") end)
@@ -886,24 +704,25 @@ if Lib then
     stAuto:Label(function() return "Deals accepted:  " .. fmtN(STATS.deals) end)
     stAuto:Label(function() return "Rebirths:  " .. fmtN(STATS.rebirths) end)
     stAuto:Label(function() return "Evolves:  " .. fmtN(STATS.evolves) end)
+    stAuto:Label(function() return "Ascends:  " .. fmtN(STATS.ascends) end)
 
-    window:AddSettingsTab("cog")
+window:AddSettingsTab("cog")
 
-    -- floating status HUD, built on the lib's CreateBox: Stat = "label | value" + auto status dot, Bar = rebirth %
-    do
+do
         local vx = 1920; pcall_(function() vx = camera.ViewportSize.X end)
         local sbox = Lib:CreateBox({ title = "Sell Lemons", position = Vec2(vx - 306, 50), width = 288 })
         UIRef.statusBox = sbox
         for i = 1, 5 do sbox:Stat(function() return (S.slot and S.slot[i]) or "" end) end
-        sbox:Bar(function()   -- rebirth bar goes right under the rebirth line (slot 5), not at the very bottom
+        sbox:Bar(function()
             local gm = S.barGeom
             if not gm or (tick_() - (RB.checkStartT or 0)) < 30 then return nil end
             return gm.pct or 0
         end)
-        sbox:Stat(function() return (S.slot and S.slot[6]) or "" end)   -- evolve line below the bar
+        sbox:Stat(function() return (S.slot and S.slot[6]) or "" end)
+        sbox:Stat(function() return (S.slot and S.slot[7]) or "" end)
     end
 
-    Lib:Notify("Sell Lemons", "v23  -  Q to toggle  -  by Inspecttor", 5)
+Lib:Notify("Sell Lemons", "v24  -  Q to toggle  -  by Inspecttor", 5)
     print("[Hub] INS ui loaded")
 end
 
@@ -920,82 +739,61 @@ local function isGreyedOut(v)
     if not ok or not color3 then return false end
     local r, g, b = normalizeColor(color3)
 
-    return mabs(r - g) < 14 and mabs(g - b) < 14 and mabs(r - b) < 14 and mabs(r - 102) <= 22
+return mabs(r - g) < 14 and mabs(g - b) < 14 and mabs(r - b) < 14 and mabs(r - 102) <= 22
 end
 
-local decorFolderMemo = {}
-local function _isDecorBtn(btn, key)
-    if not btn then return false end
-    key = key or getButtonKey(btn)
-    local inDecor = key and decorFolderMemo[key]
-    if inDecor == nil then
-        inDecor = false
-        pcall_(function()
-            local cur, prev = btn.Parent, nil
-            for _ = 1, 8 do
-                if not cur then break end
-                local nm = tostring_(cur.Name)
-                if nm == "Buttons" then
-                    if prev == "Decor" then inDecor = true end
-                    return
-                end
-                prev = nm
-                cur = cur.Parent
-            end
-        end)
-        if key then decorFolderMemo[key] = inDecor end
-    end
-    if inDecor then return true end
-    local red = false
+local BUY = { poll = 0.03, window = 0.45 }
+
+local abModels, abTyName
+local function purchasables()
+
+local cur; pcall_(function() cur = myTycoon and tostring_(myTycoon.Name) end)
+    local fresh = false
+    pcall_(function() fresh = abModels and abModels[1] and abModels[1].Parent ~= nil and abTyName == cur end)
+    if fresh then return abModels end
+    abModels = {}
+    if not myTycoon or not myTycoon.Parent then myTycoon = findMyTycoon() or myTycoon end
+    local t = myTycoon
+    if not t then return abModels end
+    pcall_(function() abTyName = tostring_(t.Name) end)
     pcall_(function()
-        local c = btn.Color
-        if c then
-            local r, g, b = normalizeColor(c)
-            if r >= 140 and g <= 75 and b <= 75 then red = true end
+        local pur = t:FindFirstChild("Purchases")
+        if not pur then return end
+        for _, d in ipairs_(pur:GetDescendants()) do
+            if d.Name == "Purchase" and d.Parent then abModels[#abModels + 1] = d.Parent end
         end
     end)
-    return red
+    return abModels
 end
 
-local buttonsCacheReady = true
-local _acache = { t = 0, list = nil }
-
-local function buildButtonsCache()
-
-    _acache.list = nil; _acache.deadT = nil; _acache.liveT = nil
-    if not myTycoon or not myTycoon.Parent then myTycoon = findMyTycoon() or myTycoon end
-    buttonsCacheReady = true
-end
-buildButtonsCache()
-
-local function getButtonsRealTime()
-    local now = tick_()
-    if _acache.list and (now - _acache.t) < 0.12 then return _acache.list end
-    local temp = {}
-    local t = myTycoon
-    if not t or not t.Parent then t = findMyTycoon(); if t then myTycoon = t end end
-    if t then
+local buyList, buyListT = {}, 0
+local function buyCandidates()
+    if #buyList > 0 and (tick_() - buyListT) < 0.4 then return buyList end
+    buyListT, buyList = tick_(), {}
+    for _, m in ipairs_(purchasables()) do
+        local btn
         pcall_(function()
-            local purchases = t:FindFirstChild("Purchases")
-            if not purchases then return end
-            for _, cat in ipairs_(purchases:GetChildren()) do
-                local bf = cat:FindFirstChild("Buttons")
-                if bf then
-                    for _, model in ipairs_(bf:GetChildren()) do
-                        local btn = model:FindFirstChild("Button")
-                        if btn and btn:IsA("BasePart") and btn.Parent then tinsert(temp, btn) end
-                        for _, child in ipairs_(model:GetDescendants()) do
-                            if child.Name == "Button" and child ~= btn and child:IsA("BasePart") and child.Parent then
-                                tinsert(temp, child)
-                            end
-                        end
-                    end
-                end
+            if m.Parent and m:GetAttribute("Shown") == true and m:GetAttribute("Purchased") ~= true then
+                local b = m:FindFirstChild("Button")
+                if b and b:IsA("BasePart") then btn = b end
             end
         end)
+        if btn then buyList[#buyList + 1] = { m = m, btn = btn } end
     end
-    _acache.list = temp; _acache.t = now
-    return temp
+    return buyList
+end
+
+local function isDecorModel(m)
+    if not m then return false end
+    local inDecor = false
+    pcall_(function()
+        local p = m.Parent
+        while p and p ~= Workspace do
+            if tostring_(p.Name) == "Decor" then inDecor = true; return end
+            p = p.Parent
+        end
+    end)
+    return inDecor
 end
 
 local lemonTrees       = {}
@@ -1067,7 +865,7 @@ end
 local function buildLemonTreeCache()
     lemonTrees, lemonTreeSet = {}, {}
 
-    local rootLT = Workspace:FindFirstChild("LemonTree")
+local rootLT = Workspace:FindFirstChild("LemonTree")
     if rootLT then addLemonTree(rootLT) end
     pcall_(function()
         Workspace.ChildAdded:Connect(function(child)
@@ -1079,11 +877,11 @@ local function buildLemonTreeCache()
         end)
     end)
 
-    for _, tycoon in ipairs_(Workspace:GetChildren()) do
+for _, tycoon in ipairs_(Workspace:GetChildren()) do
         hookTycoonForTrees(tycoon)
     end
 
-    lemonTreeCacheReady = true
+lemonTreeCacheReady = true
 end
 
 buildLemonTreeCache()
@@ -1166,87 +964,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-local localQueue   = {}
-local queueIndex   = 1
-local queueLock    = false
-local totalFailed  = 0
-local lastResetTime = 0
-
-local function appendNewButtons()
-
-    local waitT = tick_()
-    while queueLock do
-        if (tick_() - waitT) > 1 then queueLock = false; break end
-        task_wait(0.001)
-    end
-    queueLock = true
-    local added = 0
-    pcall_(function()
-        if not myTycoon or not myTycoon.Parent then return end
-        local buttons = getButtonsRealTime()
-        lastButtonCount = #buttons
-        local existingKeys = {}
-        local lq = localQueue
-        for i = queueIndex, #lq do
-            local it = lq[i]
-            if it and it.key then existingKeys[it.key] = true end
-        end
-        local chr = player.Character
-        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
-        local hrpPos = hrp and hrp.Position or nil
-        for _, v in ipairs_(buttons) do
-            local key = getButtonKey(v)
-            if key then
-                if not existingKeys[key] and buyReady(key, v) and not isGreyedOut(v) and not buyBlacklist[key]
-                   and not (skipDecorActive and _isDecorBtn(v, key)) then
-                    local dist = hrpPos and (v.Position - hrpPos).Magnitude or 999999
-                    tinsert(lq, { btn = v, key = key, dist = dist, fails = fails })
-                    added = added + 1
-                end
-            end
-        end
-    end)
-    queueLock = false
-    return added
-end
-
-local function allButtonsDead()
-    local now = tick_()
-    if _acache.deadT and (now - _acache.deadT) < 0.15 then return _acache.dead end
-    local buttons = getButtonsRealTime()
-    local dead = (#buttons > 0)
-    for _, v in ipairs_(buttons) do
-        local key = getButtonKey(v)
-        if key then
-            if buyReady(key, v) and not buyBlacklist[key] and not isGreyedOut(v)
-               and not (skipDecorActive and _isDecorBtn(v, key)) then dead = false; break end
-        end
-    end
-    _acache.deadT = now; _acache.dead = dead
-    return dead
-end
-
-local function cleanupQueue()
-
-    local waitT = tick_()
-    while queueLock do
-        if (tick_() - waitT) > 1 then queueLock = false; break end
-        task_wait(0.001)
-    end
-    queueLock = true
-    pcall_(function()
-        if queueIndex > 20 then
-            local newQueue = {}
-            local lq = localQueue
-            local n = 0
-            for i = queueIndex, #lq do n = n + 1; newQueue[n] = lq[i] end
-            localQueue = newQueue
-            queueIndex = 1
-        end
-    end)
-    queueLock = false
-end
-
 local STAND_KEY            = 0x45
 local STAND_CYCLE_PAUSE    = 0.02
 local STAND_TP_Y_OFFSET    = 3
@@ -1254,7 +971,7 @@ local STAND_LOOP_DELAY     = 0.1
 
 local function _tpHrpTo(pos)
 
-    if autoStandActive then LSM.standBusyT = tick_() end
+if autoStandActive then LSM.standBusyT = tick_() end
     local character = player.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
@@ -1272,29 +989,20 @@ local function _windowFocused()
 end
 
 local function _anyLiveButtons()
-    local now = tick_()
-    if _acache.liveT and (now - _acache.liveT) < 0.15 then return _acache.live end
-    local buttons = getButtonsRealTime()
-    local live = false
-    for _, v in ipairs_(buttons) do
-        local key = getButtonKey(v)
-        if key then
-            -- "work" = a button we could actually buy now: live, not greyed/unaffordable, not on cooldown.
-            -- (cooldown-aware so the lemon farm doesn't keep pausing for a button auto-buy has shelved)
-            if not (buyCooldown[v] and tick_() < buyCooldown[v]) and not isGreyedOut(v)
-               and not (skipDecorActive and _isDecorBtn(v, key)) then live = true; break end
-        end
+    for _, c in ipairs_(buyCandidates()) do
+        local btn, alive = c.btn, false
+        pcall_(function() alive = (btn.Parent ~= nil) end)
+        if alive and not isGreyedOut(btn) and not (skipDecorActive and isDecorModel(c.m)) then return true end
     end
-    _acache.liveT = now; _acache.live = live
-    return live
+    return false
 end
 
 local function _anyBuyableNowButtons()
 
-    if (tick_() % 25) < 5 then return false end
+if (tick_() % 25) < 5 then return false end
     return _anyLiveButtons()
 end
-local function _autobuyHasWork() return _anyLiveButtons() end  -- stateless: live scan, not the (now-unused) queue
+local function _autobuyHasWork() return _anyLiveButtons() end
 local STAND_E_SPAM_DURATION = 3.0
 
 local function runLocationsPass(firstRun)
@@ -1309,12 +1017,12 @@ local function runLocationsPass(firstRun)
         end
     end
 
-    LSM.standBusyT = tick_()
+LSM.standBusyT = tick_()
     LSM.standPassT = tick_()
 
-    LSM.zoom(-1)
+LSM.zoom(-1)
 
-    local tilted = LSM.tiltDown()
+local tilted = LSM.tiltDown()
     local tapped = 0
     for _, s in ipairs_(locs) do
         if not ScriptActive or not autoStandActive then return "off" end
@@ -1324,7 +1032,7 @@ local function runLocationsPass(firstRun)
             if _tpHrpTo(s.pos) then
                 task_wait(0.05)
 
-                local eye, target
+local eye, target
                 if not tilted then
                     pcall_(function()
                         local h = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -1350,114 +1058,82 @@ local function runLocationsPass(firstRun)
         end
     end
 
-    if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
+if firstRun then print("[Stand] pass end, tapped=" .. tapped) end
     return "done"
 end
 
--- ============================================================================
--- STATELESS auto-buy. Every pass re-scans the LIVE buttons and TP-touches any
--- that is buyable right now. There is no persistent queue / blacklist / backoff
--- / decor-memo, so nothing can wedge across passes - a button that was skipped
--- (unaffordable, busy, far) is re-evaluated from scratch next pass. This removes
--- the whole class of "one button stays skipped until a full restart" bugs that
--- the old queue + two-worker + blacklist machinery could produce.
--- ============================================================================
-
--- live decor test (no memo: a stale decorFolderMemo key was a permanent-skip risk)
-local function isDecorLive(btn)
-    if not btn then return false end
-    local inDecor = false
-    pcall_(function()
-        local cur, prev = btn.Parent, nil
-        for _ = 1, 8 do
-            if not cur then break end
-            local nm = tostring_(cur.Name)
-            if nm == "Buttons" then if prev == "Decor" then inDecor = true end return end
-            prev = nm; cur = cur.Parent
-        end
-    end)
-    if inDecor then return true end
-    local red = false
-    pcall_(function()
-        local c = btn.Color
-        if c then local r, g, b = normalizeColor(c); if r >= 140 and g <= 75 and b <= 75 then red = true end end
-    end)
-    return red
-end
-
--- TP onto the button so the character touches it; poll until it disappears.
--- Touch -> server removes the button -> replicates back = a network round-trip;
--- the deadline is generous so a slow PC / high ping still registers before timeout.
--- Auto Buy speed presets: gentler pacing = less single-thread hogging = smoother on weak PCs (but slower buying).
-local BUY_PACE = {
-    Low  = { poll = 0.06,  deadline = 0.55, passBusy = 0.06, passIdle = 0.30 },
-    Mid  = { poll = 0.03,  deadline = 0.50, passBusy = 0.02, passIdle = 0.15 },
-    High = { poll = 0.015, deadline = 0.40, passBusy = 0.0,  passIdle = 0.05 },
-}
-local function buyPace() return BUY_PACE[CFG.buySpeed] or BUY_PACE.Mid end
-local function tpTouchBuy(hrp, btn)
-    local pc = buyPace()
-    local pos = btn.Position
+local function tpBuy(btn)
+    local pos; pcall_(function() pos = btn.Position end)
+    if not pos then return false end
+    local character = player.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
     local px, py, pz = pos.X, pos.Y, pos.Z
     LSM.lastBot = tick_(); LSM.buySweepT = tick_()
     pcall_(function() hrp.CFrame = CF(px, py + 2.5, pz) end)
-    task_wait(pc.poll)
-    local deadline = tick_() + pc.deadline
+    task_wait(BUY.poll)
+    local deadline = tick_() + BUY.window
     repeat
+        character = player.Character
+        hrp = (character and character:FindFirstChild("HumanoidRootPart")) or hrp
         pcall_(function() hrp.CFrame = CF(px, py + 0.8, pz) end)
         LSM.lastBot = tick_(); LSM.buySweepT = tick_()
-        task_wait(pc.poll)
+        task_wait(BUY.poll)
         local gone = false
-        pcall_(function() gone = not (btn and btn.Parent and btn:IsDescendantOf(myTycoon)) end)
+        pcall_(function() gone = (btn.Parent == nil) end)
         if gone then return true end
     until tick_() >= deadline
-    return false
+    local gone = false
+    pcall_(function() gone = (btn.Parent == nil) end)
+    return gone
+end
+
+local function cutsceneActive()
+    if (tick_() - (S.cutsceneT or 0)) < 9 then return true end
+    local pg = getPlayerGui(); if not pg then return false end
+    local cin; pcall_(function() cin = pg:FindFirstChild("Cinematic") end)
+    if not cin then return false end
+    local en; pcall_(function() en = cin.Enabled end)
+    return en == true
 end
 
 _wrap("autobuy-worker", function()
     while ScriptActive do
         syncFromUI()
         if not autoBuyActive then task_wait(0.1); continue end
-        -- auto-buy is TP-based, so it does NOT need to pause for rebirth/evolve GUI peeks (RB.busyT). It only
-        -- yields to the stand, a minigame, and the actual rebirth wanting its slot - so it runs alongside evolve.
-        if _standIsTapping or MG.lemBusy()
+        if cutsceneActive() then task_wait(0.3); continue end
+
+if _standIsTapping or MG.lemBusy()
            or (autoRebirthActive and RB.wantSlot) then task_wait(0.05); continue end
 
-        local character = player.Character
+local character = player.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
         if not hrp then task_wait(0.1); continue end
 
-        local buttons = getButtonsRealTime()   -- self-finds myTycoon, cached 0.12s; always the LIVE set
-        lastButtonCount = #buttons
+local cands = buyCandidates()
+        lastButtonCount = #cands
         local didBuy = false
-        for _, btn in ipairs_(buttons) do
+        for _, c in ipairs_(cands) do
             if not autoBuyActive then break end
-            -- yield to stand / rebirth / minigame mid-pass so auto-buy doesn't fight them for the character
-            if _standIsTapping or (autoRebirthActive and RB.wantSlot) or MG.lemBusy() then break end
-            local cd = buyCooldown[btn]
-            if cd and tick_() < cd then continue end   -- couldn't buy it recently (e.g. not enough cash yet) - skip for now
-            local live = false
-            pcall_(function() live = btn and btn.Parent and (not myTycoon or btn:IsDescendantOf(myTycoon)) end)
-            if live and not isGreyedOut(btn) and not (skipDecorActive and isDecorLive(btn)) then
-                local key = getButtonKey(btn)
-                if tpTouchBuy(hrp, btn) then
-                    buyCooldown[btn] = nil
+
+if _standIsTapping or (autoRebirthActive and RB.wantSlot) or MG.lemBusy() then break end
+            local btn = c.btn
+            local alive = false
+            pcall_(function() alive = (btn.Parent ~= nil) end)
+            if alive and not isGreyedOut(btn) and not (skipDecorActive and isDecorModel(c.m)) then
+                if tpBuy(btn) then
                     didBuy = true
                     STATS.bought = STATS.bought + 1
-                    print("[Buy] " .. tostring(key) .. " | Total: " .. STATS.bought)
-                else
-                    buyCooldown[btn] = tick_() + BUY_RETRY   -- can't buy now; retry in ~2s once cash builds
-                    totalFailed = totalFailed + 1
                 end
             end
         end
-        local _bp = buyPace(); task_wait(didBuy and _bp.passBusy or _bp.passIdle)
+        task_wait(didBuy and 0.02 or 0.08)
     end
 end)
 
 _wrap("autobuy-coord", function()
-    -- keep myTycoon fresh during idle/closed-menu periods (getButtonsRealTime also self-heals it)
-    while ScriptActive do
+
+while ScriptActive do
         if not myTycoon or not myTycoon.Parent then myTycoon = findMyTycoon() or myTycoon end
         task_wait(0.5)
     end
@@ -1608,9 +1284,9 @@ function LSM.zoom(dir)
     if LSM.mode == "cd" or LSM.mode == "sig" then return end
     if type(mousescroll) ~= "function" then return end
 
-    if not _windowFocused() then return end
+if not _windowFocused() then return end
 
-    LSM.zoomGen = (LSM.zoomGen or 0) + 1
+LSM.zoomGen = (LSM.zoomGen or 0) + 1
     local gen = LSM.zoomGen
     LSM.zoomedIn = dir > 0
     for _ = 1, CFG.zoomTicks do
@@ -1668,7 +1344,7 @@ function LSM.returnHome()
         end)
     end
 
-    LSM.zoom(-1)
+LSM.zoom(-1)
     LSM.lastBot = tick_()
     if type(mousescroll) == "function" and _windowFocused() then
         pcall_(function()
@@ -1687,16 +1363,16 @@ end
 local function processLemon(v, hrp)
     if not v or not v:IsDescendantOf(Workspace) then return false end
 
-    if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
+if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then return false end
 
-    if not _windowFocused() then return false end
+if not _windowFocused() then return false end
     if (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4 then return false end
 
-    if not LSM.zoomedIn then return false end
+if not LSM.zoomedIn then return false end
 
-    if _camFirstPerson(hrp) == false then LSM.zoomedIn = false; return false end
+if _camFirstPerson(hrp) == false then LSM.zoomedIn = false; return false end
 
-    local origSize, origTransp, origCanColl = nil, nil, nil
+local origSize, origTransp, origCanColl = nil, nil, nil
     local hitboxApplied = false
     if LEMON_HITBOX_ENABLED then
         pcall_(function()
@@ -1710,19 +1386,19 @@ local function processLemon(v, hrp)
         end)
     end
 
-    local vp = v.Position
+local vp = v.Position
     local tpX, tpY, tpZ = vp.X, vp.Y - 4, vp.Z
 
-    pcall_(function()
+pcall_(function()
         hrp.CFrame = CF(tpX, tpY, tpZ)
         task_wait(LEMON_TP_WAIT)
 
-        LSM.lastBot = tick_()
+LSM.lastBot = tick_()
         camera.lookAt(Vec3(tpX, tpY, tpZ), vp)
         task_wait(LEMON_CAM_WAIT)
     end)
 
-    pcall_(function()
+pcall_(function()
         local vps = camera.ViewportSize
         local cx, cy = vps.X * 0.5, vps.Y * 0.5
         for _ = 1, 6 do
@@ -1733,7 +1409,7 @@ local function processLemon(v, hrp)
             end
             LSM.lastBot = tick_()
 
-            if on and sp and sp.X == sp.X and mabs(sp.X) < vps.X * 4 and mabs(sp.Y) < vps.Y * 4 then
+if on and sp and sp.X == sp.X and mabs(sp.X) < vps.X * 4 and mabs(sp.Y) < vps.Y * 4 then
                 mousemoverel(mfloor((sp.X - cx) * 0.5), mfloor((sp.Y - cy) * 0.5))
             elseif on then
                 mousemoverel(0, -260)
@@ -1744,7 +1420,7 @@ local function processLemon(v, hrp)
         end
     end)
 
-    pcall_(function()
+pcall_(function()
         LSM.lastBot = tick_()
         local vps = camera.ViewportSize
         mousemoveabs(mfloor(vps.X / 2), mfloor(vps.Y / 2))
@@ -1755,10 +1431,10 @@ local function processLemon(v, hrp)
         end
     end)
 
-    local collected = not (v and v.Parent and v:IsDescendantOf(Workspace))
-    pcall_(function() if v then _lemonPending[v] = true end end)  -- count it for real in the worker once it vanishes
+local collected = not (v and v.Parent and v:IsDescendantOf(Workspace))
+    pcall_(function() if v then _lemonPending[v] = true end end)
 
-    if hitboxApplied and not collected then
+if hitboxApplied and not collected then
         pcall_(function()
             if origSize    ~= nil then v.Size         = origSize    end
             if origTransp  ~= nil then v.Transparency = origTransp  end
@@ -1766,7 +1442,7 @@ local function processLemon(v, hrp)
         end)
     end
 
-    if LEMON_POST_WAIT > 0 then task_wait(LEMON_POST_WAIT) end
+if LEMON_POST_WAIT > 0 then task_wait(LEMON_POST_WAIT) end
     return collected
 end
 
@@ -1777,7 +1453,7 @@ local function processSnapshot(snapshot, hrp)
     local count = #snapshot
     if count == 0 then return 0 end
 
-    local groups, groupOrder = {}, {}
+local groups, groupOrder = {}, {}
     for i = 1, count do
         local v = snapshot[i]
         if v and v:IsDescendantOf(Workspace) then
@@ -1792,7 +1468,7 @@ local function processSnapshot(snapshot, hrp)
         end
     end
 
-    local collectedCount = 0
+local collectedCount = 0
     for _, tree in ipairs_(groupOrder) do
         if not lemonFarmActive then break end
         if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
@@ -1804,14 +1480,14 @@ local function processSnapshot(snapshot, hrp)
         local excludeSet = {}
         for i = 1, #fruits do excludeSet[fruits[i]] = true end
 
-        local modified, modN
+local modified, modN
         if tree and LSM.mode ~= "cd" and LSM.mode ~= "sig" then
             modified, modN = disableTreeCanQuery(tree, excludeSet)
         else
             modified, modN = {}, 0
         end
 
-        for i = 1, #fruits do
+for i = 1, #fruits do
             if not lemonFarmActive then break end
             if (tick_() - (S.lastUser or 0)) < CFG.afkDelay then break end
             if autoBuyActive and not LSM.lemonSlot and _autobuyHasWork() then break end
@@ -1819,7 +1495,7 @@ local function processSnapshot(snapshot, hrp)
             if not LSM.zoomedIn then break end
             if not _windowFocused() then break end
 
-            if (tick_() - (LSM.zoomInT or 0)) >= 3 and type(mousescroll) == "function" and _camFirstPerson(hrp) ~= false then
+if (tick_() - (LSM.zoomInT or 0)) >= 3 and type(mousescroll) == "function" and _camFirstPerson(hrp) ~= false then
                 LSM.zoomInT = tick_()
                 LSM.lastBot = tick_()
                 pcall_(function() for _ = 1, 8 do mousescroll(CFG.zoomStep); task_wait(0.01) end end)
@@ -1840,7 +1516,7 @@ local function processSnapshot(snapshot, hrp)
             end
         end
 
-        if modN > 0 then restoreTreeCanQuery(modified, modN) end
+if modN > 0 then restoreTreeCanQuery(modified, modN) end
     end
     return collectedCount
 end
@@ -1851,21 +1527,21 @@ _wrap("lemon-farm", function()
         local character = player.Character
         local hrp = character and character:FindFirstChild("HumanoidRootPart")
 
-        local buyBusy = lemonFarmActive and autoBuyActive and _autobuyHasWork()
+local buyBusy = lemonFarmActive and autoBuyActive and _autobuyHasWork()
         if lemonFarmActive and LSM.annBuy ~= buyBusy then
             LSM.annBuy = buyBusy
             print(buyBusy and "[Lemon] pause: autobuy buying" or "[Lemon] autobuy done -> resume")
         end
         local afkNow = (tick_() - (S.lastUser or 0)) >= CFG.afkDelay
 
-        if buyBusy and afkNow then
+if buyBusy and afkNow then
             if STATS.bought ~= LSM.lastBoughtN then
                 LSM.lastBoughtN = STATS.bought
                 LSM.buyProgressT = tick_()
             end
             if not LSM.buyProgressT then LSM.buyProgressT = tick_() end
 
-            if (tick_() - LSM.buyProgressT) > CFG.buyStuck and (tick_() - (LSM.buySweepT or 0)) >= 4 then LSM.lemonSlot = true end
+if (tick_() - LSM.buyProgressT) > CFG.buyStuck and (tick_() - (LSM.buySweepT or 0)) >= 4 then LSM.lemonSlot = true end
         else
             LSM.buyProgressT = nil
             LSM.lastBoughtN = STATS.bought
@@ -1875,7 +1551,7 @@ _wrap("lemon-farm", function()
             LSM.annAfk = afkNow
             if afkNow then
 
-                if not LSM.anchor then
+if not LSM.anchor then
                     pcall_(function()
                         local chr2 = player.Character
                         local h2 = chr2 and chr2:FindFirstChild("HumanoidRootPart")
@@ -1886,7 +1562,7 @@ _wrap("lemon-farm", function()
                     end)
                 end
 
-                print("[Lemon] AFK -> zoom + farm")
+print("[Lemon] AFK -> zoom + farm")
             else
                 print("[Lemon] input detected -> back to your spot")
                 LSM.returnHome()
@@ -1897,26 +1573,26 @@ _wrap("lemon-farm", function()
             LSM.returnHome()
         end
 
-        local rbBusy = (tick_() - (RB.busyT or 0)) < 4 and (tick_() - (RB.checkStartT or 0)) < 30
+local rbBusy = (tick_() - (RB.busyT or 0)) < 4 and (tick_() - (RB.checkStartT or 0)) < 30
         local standBusy = (autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4) or rbBusy or MG.lemBusy() or (tick_() - (LSM.buySweepT or 0)) < 4
 
-        if standBusy then LSM.wasBusy = true elseif LSM.wasBusy then LSM.wasBusy = false; LSM.zoomInT = 0 end
+if standBusy then LSM.wasBusy = true elseif LSM.wasBusy then LSM.wasBusy = false; LSM.zoomInT = 0 end
 
-        if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
+if lemonFarmActive and hrp and (not buyBusy or LSM.lemonSlot == true) and not standBusy and afkNow and _windowFocused() then
 
-            if not LSM.zoomedIn or (tick_() - (LSM.zoomInT or 0)) >= 3 then
+if not LSM.zoomedIn or (tick_() - (LSM.zoomInT or 0)) >= 3 then
                 LSM.zoomInT = tick_()
                 pcall_(function() camera = Workspace.CurrentCamera end)
 
-                pcall_(function() if type(mouse2release) == "function" then mouse2release() end end)
+pcall_(function() if type(mouse2release) == "function" then mouse2release() end end)
 
-                pcall_(function()
+pcall_(function()
                     local vp = camera.ViewportSize
                     if vp then mousemoveabs(mfloor(vp.X / 2), mfloor(vp.Y * 0.12)) end
                 end)
                 LSM.zoom(1)
 
-                local chrA = player.Character
+local chrA = player.Character
                 local hA = chrA and chrA:FindFirstChild("HumanoidRootPart")
                 if _camFirstPerson(hA) == false then
                     pcall_(function()
@@ -1942,19 +1618,19 @@ _wrap("lemon-farm", function()
             end
             lemonFailCount = {}
 
-            local pass            = 0
+local pass            = 0
             local lastSeenCount   = -1
             local sameCountStreak = 0
 
-            while ScriptActive and lemonFarmActive and pass < LEMON_MAX_PASSES do
+while ScriptActive and lemonFarmActive and pass < LEMON_MAX_PASSES do
                 pass = pass + 1
                 local snapshot = getLemonsFast()
                 local count    = #snapshot
                 lastLemonCount = count
 
-                if count == 0 then break end
+if count == 0 then break end
 
-                if count == lastSeenCount then
+if count == lastSeenCount then
                     sameCountStreak = sameCountStreak + 1
                     if sameCountStreak >= 2 then break end
                 else
@@ -1962,45 +1638,44 @@ _wrap("lemon-farm", function()
                     lastSeenCount = count
                 end
 
-                local chr2 = player.Character
+local chr2 = player.Character
                 hrp = chr2 and chr2:FindFirstChild("HumanoidRootPart")
                 if not hrp then break end
 
-                processSnapshot(snapshot, hrp)
-                -- tally lemons that actually vanished (the click's collect replicates a beat after
-                -- processLemon's instant check, so we count confirmed-gone lemons here)
-                for lv in pairs(_lemonPending) do
+processSnapshot(snapshot, hrp)
+
+for lv in pairs(_lemonPending) do
                     if not (lv and lv.Parent and lv:IsDescendantOf(Workspace)) then
                         STATS.lemons = STATS.lemons + 1; _lemonPending[lv] = nil
                     end
                 end
 
-                task_wait(LEMON_PASS_WAIT)
+task_wait(LEMON_PASS_WAIT)
             end
 
-            if lemonFarmActive then
+if lemonFarmActive then
                 for vp = 1, LEMON_VERIFY_MAX_PASSES do
                     if not lemonFarmActive then break end
                     lemonFailCount = {}
                     task_wait(LEMON_VERIFY_WAIT)
 
-                    local chr3 = player.Character
+local chr3 = player.Character
                     local hrp3 = chr3 and chr3:FindFirstChild("HumanoidRootPart")
                     if not hrp3 then break end
 
-                    local verifySnap  = getLemonsFast()
+local verifySnap  = getLemonsFast()
                     local verifyCount = #verifySnap
                     lastLemonCount    = verifyCount
                     if verifyCount == 0 then break end
 
-                    local collected = processSnapshot(verifySnap, hrp3)
+local collected = processSnapshot(verifySnap, hrp3)
                     if collected == 0 then
                         break
                     end
                 end
             end
 
-            if LSM.lemonSlot then
+if LSM.lemonSlot then
                 LSM.lemonSlot = false
                 LSM.buyProgressT = tick_()
                 LSM.lastBoughtN = STATS.bought
@@ -2018,12 +1693,12 @@ _wrap("cash-farm", function()
         local character = player.Character
         local head = character and character:FindFirstChild("Head")
 
-        if cashFarmActive and head then
+if cashFarmActive and head then
             local snapshot = getCashDropsFast()
             local count    = #snapshot
             lastCashCount  = count
 
-            local headPos = head.Position
+local headPos = head.Position
             for i = 1, count do
                 if not cashFarmActive then break end
                 local parent = snapshot[i]
@@ -2032,7 +1707,7 @@ _wrap("cash-farm", function()
                     if not _bagSeen[parent] then _bagSeen[parent] = true; STATS.bags = STATS.bags + 1 end
                 end
             end
-            task_wait(CFG.slow and 0.6 or 0.3)
+            task_wait(0.3)
         else
             task_wait(0.2)
         end
@@ -2053,7 +1728,6 @@ for i = 1, 5 do
     stUI.dot[i] = D("Circle", {Radius = 3, NumSides = 12, Filled = true, Position = Vec2(0, 0), Color = C3rgb(255, 200, 40), Transparency = 1, Visible = false, ZIndex = 4})
 end
 
--- status lines now feed the INS ui CreateBox (S.slot[i] = "label | value", "" hides) instead of raw Drawing
 S.slot = {}
 function S.stLine(valObj, i, fullTxt)
     S.slot[i] = tostring_(fullTxt)
@@ -2116,7 +1790,6 @@ function ESP.update()
         for i = 1, #ESP.keys do _espHide(ESP.keys[i]) end
         return
     end
-    if CFG.slow then local n = tick_(); if (n - (ESP.throt or 0)) < 0.016 then return end; ESP.throt = n end
     local vp; pcall_(function() vp = camera.ViewportSize end)
     if not vp then return end
     local chr = player.Character
@@ -2144,7 +1817,7 @@ function ESP.update()
             else
                 local csp, con; pcall_(function() csp, con = WorldToScreen(cpos) end)
 
-                local centerOn = csp and con and csp.X >= 0 and csp.X <= vp.X and csp.Y >= 0 and csp.Y <= vp.Y
+local centerOn = csp and con and csp.X >= 0 and csp.X <= vp.X and csp.Y >= 0 and csp.Y <= vp.Y
                 if centerOn then
                     local minX, minY, maxX, maxY, nOn = 1e9, 1e9, -1e9, -1e9, 0
                     pcall_(function()
@@ -2171,7 +1844,7 @@ function ESP.update()
                     end)
                     if nOn > 0 and maxX > minX then
 
-                        if minX < 0 then minX = 0 end
+if minX < 0 then minX = 0 end
                         if minY < 0 then minY = 0 end
                         if maxX > vp.X then maxX = vp.X end
                         if maxY > vp.Y then maxY = vp.Y end
@@ -2208,7 +1881,7 @@ function LSM.findVine()
         local map = Workspace:FindFirstChild("Map")
         local sewer = map and map:FindFirstChild("Sewer")
 
-        if sewer then
+if sewer then
             found = sewer:FindFirstChild("CashVine")
             if not found then
                 for _, d in ipairs_(sewer:GetChildren()) do
@@ -2223,7 +1896,7 @@ function LSM.findVine()
             end
         end
 
-        if not found and map then
+if not found and map then
             for _, d in ipairs_(map:GetDescendants()) do
                 local ln = tostring_(d.Name):lower()
                 if ln:find("cash") and ln:find("vine") then found = d; break end
@@ -2261,13 +1934,13 @@ local function pollInput()
     if not ScriptActive then return end
     local nowA = tick_()
 
-    if (nowA - (S.pollT or 0)) < (CFG.slow and 0.06 or 0.03) then return end
+if (nowA - (S.pollT or 0)) < 0.03 then return end
     S.pollT = nowA
     local focused = _windowFocused()
 
-    if focused then
+if focused then
 
-        if not UIRef.win then
+if not UIRef.win then
             for i = 1, 5 do
                 local vk = 48 + i
                 if iskeypressed(vk) then
@@ -2281,47 +1954,12 @@ local function pollInput()
             end
         end
 
-        if iskeypressed(0x77) then
-            if not S.keyDown[0x77] then
-                S.keyDown[0x77] = true
-                pcall_(function()
-                    local btns = getButtonsRealTime()
-                    local inQ = {}
-                    for i = queueIndex, #localQueue do
-                        local it = localQueue[i]; if it and it.key then inQ[it.key] = true end
-                    end
-                    local nBl, nG, nF, nQ, nLive = 0, 0, 0, 0, 0
-                    rprint("[DUMP] ===== видимых кнопок: " .. #btns .. " | в очереди: " .. (#localQueue - queueIndex + 1) .. " =====")
-                    for _, v in ipairs_(btns) do
-                        local key = getButtonKey(v)
-                        if key then
-                            local g  = isGreyedOut(v)
-                            local bl = buyBlacklist[key] and true or false
-                            local f  = (buyAttempt[key] and buyAttempt[key].n) or 0
-                            local q  = inQ[key] and true or false
-                            local nm = "?"; pcall_(function() nm = tostring_(v.Parent and v.Parent.Name) end)
-                            local reason
-                            if bl then reason = "BLACKLIST(уже куплена?)"; nBl = nBl + 1
-                            elseif g then reason = "grey(не по карману)"; nG = nG + 1
-                            elseif f >= 2 then reason = "failed2x"; nF = nF + 1
-                            elseif q then reason = "в очереди"; nQ = nQ + 1
-                            else reason = "ЖИВАЯ - бот ДОЛЖЕН купить"; nLive = nLive + 1 end
-                            rprint("[DUMP] " .. nm .. " @" .. key .. " | " .. reason .. " | fails=" .. f)
-                        end
-                    end
-                    rprint("[DUMP] ИТОГ: blacklist=" .. nBl .. " grey=" .. nG .. " failed=" .. nF .. " вОчереди=" .. nQ .. " ЖИВЫХ=" .. nLive)
-                end)
-            end
-        else
-            S.keyDown[0x77] = false
-        end
-
-        local mx, my = S.pmx, S.pmy
+local mx, my = S.pmx, S.pmy
         if mouse then pcall_(function() mx = mouse.X; my = mouse.Y end) end
         local m1 = false
         pcall_(function() m1 = ismouse1pressed() end)
 
-        if autoBuyActive and _autobuyHasWork() then
+if autoBuyActive and _autobuyHasWork() then
             S.busyT = nowA
         end
         local botPhase = (lemonFarmActive and LSM.annAfk == true)
@@ -2337,7 +1975,7 @@ local function pollInput()
         end
     end
 
-    if CFG.vineGo then   -- one-way teleport to the cash vine (button); no teleport-back
+if CFG.vineGo then
         CFG.vineGo = false
         pcall_(function()
             local chr = player.Character
@@ -2349,10 +1987,10 @@ local function pollInput()
         end)
     end
 
-    if (nowA - (S.statusT or 0)) < (CFG.slow and 0.4 or 0.15) then return end
+if (nowA - (S.statusT or 0)) < 0.15 then return end
     S.statusT = nowA
 
-    local vx = 1920
+local vx = 1920
     pcall_(function() vx = camera.ViewportSize.X end)
     local vy0 = 58
     S.stX = vx - 314
@@ -2391,7 +2029,7 @@ local function pollInput()
         S.stHide(statusTx2, 2)
     end
 
-    local vReady, vTimer
+local vReady, vTimer
     pcall_(function()
         local lbl = LSM.findVineLabel()
         if lbl and lbl.Parent then
@@ -2420,13 +2058,13 @@ local function pollInput()
         LSM.vineWasReady = vReady
     end
 
-    if vTimer then
+if vTimer then
 
-        pcall_(function()
+pcall_(function()
             local hh, mm, ss = vTimer:match("^(%d+):(%d%d):(%d%d)$")
             local remS = tonumber_(hh) * 3600 + tonumber_(mm) * 60 + tonumber_(ss)
 
-            if remS > CFG.vineCd + 60 then return end
+if remS > CFG.vineCd + 60 then return end
             local newT = tick_() - (CFG.vineCd - remS)
             if not CFG.vineT or mabs(newT - CFG.vineT) > 60 then
                 CFG.vineT = newT
@@ -2435,14 +2073,14 @@ local function pollInput()
         end)
     end
 
-    if CFG.vineT and CFG.vineT > tick_() + 60 then
+if CFG.vineT and CFG.vineT > tick_() + 60 then
         CFG.vineT = nil
         pcall_(function()
             if type(writefile) == "function" then writefile("selllemons_vine.txt", "") end
         end)
     end
 
-    if vReady == true then
+if vReady == true then
         statusTx3.Color = C3rgb(236, 238, 242)
         if not CFG.vineNotif then
             CFG.vineNotif = true
@@ -2471,7 +2109,7 @@ local function pollInput()
         S.stHide(statusTx3, 3)
     end
 
-    local mgName = MG.active and MG.name() or nil   -- HUD minigame row only while Auto Minigame is enabled
+local mgName = MG.active and MG.name() or nil
     if mgName then
         local cd = MG.timerSec()
         if cd and cd > 0 then MG.miniEnd = tick_() + cd; MG.saveMiniEnd() end
@@ -2497,9 +2135,9 @@ local function pollInput()
         S.stHide(statusTx4, 4)
     end
 
-    if autoRebirthActive then
+if autoRebirthActive then
 
-        local txt5
+local txt5
         if RB.status == "idle" then
             local remP = (RB.peekEvery or 60) - (tick_() - (RB.lastPeek or 0))
             if remP < 0 then remP = 0 end
@@ -2516,7 +2154,7 @@ local function pollInput()
             txt5 = tostring_(RB.status or "...")
         end
 
-        if RB.go then
+if RB.go then
             statusTx5.Color = RB.pctColor(100)
         elseif RB.pct then
             statusTx5.Color = RB.pctColor(RB.pct)
@@ -2525,18 +2163,24 @@ local function pollInput()
         end
         S.stLine(statusTx5, 5, "rebirth  |  " .. txt5)
 
-        S.barGeom = { bx = S.stX + 50, by = S.stY + 1, pct = (RB.go and 100 or (RB.pct or 0)) }
+S.barGeom = { bx = S.stX + 50, by = S.stY + 1, pct = (RB.go and 100 or (RB.pct or 0)) }
         S.stY = S.stY + 16
     else
         S.stHide(statusTx5, 5)
         S.barGeom = nil
     end
 
-    if autoEvolveActive then
+if autoEvolveActive then
         local t6 = (evolveProgress >= 100) and "READY" or (fmtPct1(evolveProgress) .. "%  |  " .. fmtPct1(100 - evolveProgress) .. "% left")
         S.stLine(statusTx5, 6, "evolve  |  " .. t6)
     else
         S.stHide(statusTx5, 6)
+    end
+
+if autoAscendActive then
+        S.stLine(statusTx5, 7, "ascend  |  " .. (ASC.ready and "READY - all bought" or ((ASC.bought or 0) .. "/" .. (ASC.total or "?") .. " bought")))
+    else
+        S.stHide(statusTx5, 7)
     end
 
 end
@@ -2593,10 +2237,10 @@ _wrap("auto-deal", function()
                 local phone = pg:FindFirstChild("Phone")
                 if not phone then return end
 
-                local phEn; pcall_(function() phEn = phone.Enabled end)
+local phEn; pcall_(function() phEn = phone.Enabled end)
                 if phEn == false then return end
 
-                local btns, bn = {}, 0
+local btns, bn = {}, 0
                 for _, d in ipairs_(phone:GetDescendants()) do
                     local cn = tostring_(d.ClassName)
                     if cn == "TextButton" or cn == "ImageButton" then
@@ -2609,7 +2253,7 @@ _wrap("auto-deal", function()
                 end
                 if bn < 2 then return end
 
-                local best, bestY
+local best, bestY
                 for i = 1, bn do
                     local y
                     pcall_(function() y = btns[i].AbsolutePosition.Y end)
@@ -2620,11 +2264,11 @@ _wrap("auto-deal", function()
                 end
                 if not best or isReject(btnText(best)) then return end
 
-                local rmb = false
+local rmb = false
                 pcall_(function() if type(ismouse2pressed) == "function" then rmb = ismouse2pressed() end end)
                 if rmb or not _windowFocused() then return end
 
-                local apos, asz
+local apos, asz
                 pcall_(function() apos = best.AbsolutePosition; asz = best.AbsoluteSize end)
                 if apos and asz then
                     local inset = 0
@@ -2641,7 +2285,7 @@ _wrap("auto-deal", function()
                         if ox and ox > 0 and oy and oy > 0 then mousemoveabs(mfloor(ox), mfloor(oy)) end
                     end)
 
-                    task_wait(0.12)
+task_wait(0.12)
                     if best.Parent and shownB(best) then
                         LSM.lastBot = tick_()
                         pcall_(function()
@@ -2656,7 +2300,7 @@ _wrap("auto-deal", function()
                 task_wait(1)
             end)
         end
-        task_wait(CFG.slow and 1.2 or 0.5)
+        task_wait(0.5)
     end
 end)
 
@@ -2699,7 +2343,7 @@ local function parseHugeLog(s)
         end
     end
 
-    local num = s:match("[%d][%d%.,]*")
+local num = s:match("[%d][%d%.,]*")
     if num then
         local n = tonumber_((num:gsub(",", "")))
         if n and n > 0 then return _log10(n) end
@@ -2750,7 +2394,7 @@ function RB.gui()
                     if ap and type(ap.X) == "number" then alive = true end
                 end)
 
-                if alive and not best then best = c end
+if alive and not best then best = c end
             end
         end
     end)
@@ -2782,7 +2426,7 @@ function RB.curFromAttr()
         if v <= 0 then Z = true else L = _log10(v) end
     elseif type(v) == "string" then
 
-        local s = v:gsub("^%s+", ""):gsub("%s+$", "")
+local s = v:gsub("^%s+", ""):gsub("%s+$", "")
         if s:match("^[%d%.,]+$") then
             local n = tonumber_((s:gsub(",", "")))
             if n and n > 0 then L = _log10(n) elseif n == 0 then Z = true end
@@ -2795,7 +2439,7 @@ function RB.curFromAttr()
         end
     end
 
-    if L and RB.curLog and L < RB.curLog - 6 then
+if L and RB.curLog and L < RB.curLog - 6 then
         print("[Rebirth] attr looks bogus (way below cache) -> fallback")
         return nil, nil
     end
@@ -2872,7 +2516,7 @@ function RB.calibrate(gainLog, pLog, cashLog)
         cT = _log10(v8) + RB.U2LOG + pLog / RB.U3
     end
 
-    if (not RB.earnLog) or cT > RB.earnLog then RB.earnLog = cT end
+if (not RB.earnLog) or cT > RB.earnLog then RB.earnLog = cT end
     RB.lastCashLog = cashLog
     RB.spentEstT = tick_()
     print("[Rebirth] calibrated: total earned ~" .. fmtAbbr(cT))
@@ -2889,7 +2533,7 @@ function RB.computeDecision()
     end
     RB.compFailN = 0
 
-    local curLog, curZero, curSrc
+local curLog, curZero, curSrc
     local lLog, lZero = RB.curFromLabel()
     if lLog then curLog, curSrc = lLog, "label"
     elseif lZero then curZero, curSrc = true, "label0"
@@ -2905,7 +2549,7 @@ function RB.computeDecision()
         return
     end
 
-    if not RB.earnLog then
+if not RB.earnLog then
         RB.earnLog = cashLog
     elseif RB.lastCashLog and cashLog > RB.lastCashLog + 1e-12 then
         local d = _logSub(cashLog, RB.lastCashLog)
@@ -2925,18 +2569,18 @@ function RB.computeDecision()
         pct = math.min(999, 10 ^ (gainLog - th) * 100)
     end
 
-    local stale = (not RB.spentEstT) or ((tick_() - RB.spentEstT) > 900)
+local stale = (not RB.spentEstT) or ((tick_() - RB.spentEstT) > 900)
     local probe = stale and pct >= 2 and (tick_() - (RB.probeTryT or 0)) > 300
     local fire = go or (pct >= 100) or probe
     RB.go = fire
     RB.goN = fire and ((RB.goN or 0) + 1) or 0
     RB.pct = pct
 
-    RB.lastInfo = ((RB.spentEstT or pct < 2) and "" or "~") .. RB.fmtPct(pct)
+RB.lastInfo = ((RB.spentEstT or pct < 2) and "" or "~") .. RB.fmtPct(pct)
     RB.status = sformat("%s  |  %s  |  %s", RB.thStr(), RB.lastInfo,
         (pct >= 100) and "GO" or (fire and "verify" or "wait"))
 
-    if (tick_() - (RB.diagT or 0)) >= 60 then
+if (tick_() - (RB.diagT or 0)) >= 60 then
         RB.diagT = tick_()
         local offT = RB.numText(RB.node(RB.gui(), "Sidebar/Container/Investors/Offset"))
         print("[RB peek] est=" .. RB.fmtPct(pct) .. "  gain~" .. (gainLog and fmtAbbr(gainLog) or "?")
@@ -2989,7 +2633,7 @@ end
 function RB.prepClick()
     RB.busyT = tick_()
 
-    if lemonFarmActive or LSM.zoomedIn then
+if lemonFarmActive or LSM.zoomedIn then
         LSM.zoomedIn = false
         pcall_(function() LSM.zoom(-1) end)
         local chr = player.Character
@@ -3011,7 +2655,7 @@ function RB.click(node)
     if not ap or not az then return false end
     if ap.X <= 1 and ap.Y <= 1 then return false end
 
-    local inset = 0
+local inset = 0
     pcall_(function() if GuiService then inset = GuiService:GetGuiInset().Y end end)
     local cx, cy = mfloor(ap.X + az.X / 2), mfloor(ap.Y + az.Y / 2 + inset)
     local ox, oy = S.mx, S.my
@@ -3019,7 +2663,7 @@ function RB.click(node)
     RB.busyT = tick_(); LSM.lastBot = tick_()
     pcall_(function()
 
-        mousemoveabs(cx - 4, cy); task_wait(0.03)
+mousemoveabs(cx - 4, cy); task_wait(0.03)
         mousemoveabs(cx, cy); RB.busyT = tick_(); task_wait(0.14)
         mouse1press(); RB.busyT = tick_(); task_wait(0.28)
         mouse1release(); task_wait(0.1)
@@ -3043,7 +2687,7 @@ end
 function RB.gainFromMsg(msg)
     local m = tostring_(msg):gsub("<[^>]*>", " ")
 
-    local seg = m:match("[Ff]or%s+([%d][%d%.,]*%s*%a+)")
+local seg = m:match("[Ff]or%s+([%d][%d%.,]*%s*%a+)")
             or m:match("[Gg]ain%s+([%d][%d%.,]*%s*%a+)")
             or m:match("[Rr]eceive%s+([%d][%d%.,]*%s*%a+)")
             or m:match("%+%s*([%d][%d%.,]*%s*%a+)%s*[Ii]nvestor")
@@ -3067,7 +2711,7 @@ end
 function RB.confirmRebirth(cf)
     if not autoRebirthActive then RB.status = "off"; return end
 
-    pcall_(function()
+pcall_(function()
         local inset = 0
         if GuiService then pcall_(function() inset = GuiService:GetGuiInset().Y end) end
         local c = RB.findConfirm() or cf
@@ -3105,18 +2749,16 @@ function RB.confirmRebirth(cf)
         RB.goN = 0; RB.sideLog = nil
         RB.earnLog = nil; RB.lastCashLog = nil; RB.spentEstT = tick_()
 
-        if RB.curLog and RB.pendGain then RB.curLog = _logAdd(RB.curLog, RB.pendGain) end
+if RB.curLog and RB.pendGain then RB.curLog = _logAdd(RB.curLog, RB.pendGain) end
 
-        if not RB.findConfirm() then
+if not RB.findConfirm() then
             RB.busyT = 0; RB.checkStartT = 0
             LSM.zoomedIn = false; LSM.zoomInT = 0
         end
 
-        pcall_(function()
-            resetBuyBlacklist()
-            localQueue = {}; queueIndex = 1
-            task_wait(3)
-            buildButtonsCache()
+pcall_(function()
+            abModels = nil
+            myTycoon = findMyTycoon() or myTycoon
         end)
         RB.status = "REBIRTHED!"
         rprint("[Rebirth] confirmed (" .. RB.thStr() .. ")")
@@ -3135,7 +2777,7 @@ end
 function RB.decide(curT, gainT)
     local curLog, gainLog = parseHugeLog(curT), parseHugeLog(gainT)
 
-    if not gainLog then
+if not gainLog then
         if RB.isZero(gainT) then return false, 0 end
         return nil
     end
@@ -3145,7 +2787,7 @@ function RB.decide(curT, gainT)
     end
     local th = _log10(RB.thPct() / 100) + curLog
 
-    return (gainLog >= th), math.min(999, 10 ^ (gainLog - th) * 100)
+return (gainLog >= th), math.min(999, 10 ^ (gainLog - th) * 100)
 end
 
 function RB.fmtPct(p)
@@ -3159,7 +2801,7 @@ function RB.pctRGB(p)
     p = p or 0
     if p < 0 then p = 0 elseif p > 100 then p = 100 end
 
-    local v = mfloor(108 + (p / 100) * 147)
+local v = mfloor(108 + (p / 100) * 147)
     if v > 255 then v = 255 end
     local b = v + 6; if b > 255 then b = 255 end
     return v, v, b
@@ -3181,7 +2823,7 @@ end
 function RB.closePanel(g)
     g = RB.gui() or g
 
-    for _ = 1, 6 do
+for _ = 1, 6 do
         if not RB.panelOpen(g) then return end
         local close = RB.node(g, "InvestorsMenu/Close")
         if close then RB.click(close) end
@@ -3202,11 +2844,11 @@ function RB.runCheck(g)
     RB.checkStartT = tick_()
     RB.busyT = tick_()
 
-    if lemonFarmActive and LSM.zoomedIn then
+if lemonFarmActive and LSM.zoomedIn then
         for _ = 1, 4 do task_wait(0.4); RB.busyT = tick_() end
     end
 
-    if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then
+if autoStandActive and (tick_() - (LSM.standBusyT or 0)) < 4 then
         RB.status = "waiting: auto stand"
         RB.busyT = 0
         RB.lastPeek = tick_() - (RB.peekEvery or 60) + 5
@@ -3216,7 +2858,7 @@ function RB.runCheck(g)
     local sb = RB.node(g, "Sidebar/Container/Investors")
     if not sb then RB.status = "Investors button not found"; print("[Rebirth] sidebar Investors missing"); return end
 
-    if not RB.panelOpen(g) then
+if not RB.panelOpen(g) then
         local ok = false
         for att = 1, 2 do
             if not autoRebirthActive then return end
@@ -3230,7 +2872,7 @@ function RB.runCheck(g)
         end
         if not ok then
 
-            for _ = 1, 5 do
+for _ = 1, 5 do
                 task_wait(0.3); RB.busyT = tick_()
                 if RB.panelOpen(g) then ok = true; break end
             end
@@ -3242,13 +2884,13 @@ function RB.runCheck(g)
         end
     end
 
-    local curLog, curZero = nil, false
+local curLog, curZero = nil, false
     do
     local curT
 
-    local zeroHits, valHits = 0, 0
+local zeroHits, valHits = 0, 0
 
-    local curTries = RB.curLog and 4 or 8
+local curTries = RB.curLog and 4 or 8
     for _ = 1, curTries do
         curT = RB.numText(RB.node(RB.gui() or g, "InvestorsMenu/Body/Amount/Quantity"))
         if RB.strictLog(curT) then
@@ -3270,7 +2912,7 @@ function RB.runCheck(g)
         print("[Rebirth] cur garbled -> using cached")
     else
 
-        local aLog = RB.curFromAttr()
+local aLog = RB.curFromAttr()
         if aLog then
             curLog = aLog; RB.curLog = aLog
             print("[Rebirth] investors source = attribute (" .. fmtAbbr(aLog) .. ")")
@@ -3281,18 +2923,18 @@ function RB.runCheck(g)
         print("[Rebirth] Amount unreadable & no cache, retry in 8s")
         RB.closePanel(g)
 
-        RB.lastPeek = tick_() - (RB.peekEvery or 60) + 8
+RB.lastPeek = tick_() - (RB.peekEvery or 60) + 8
         return
         end
     end
     end
 
-    local cashLog = RB.cashLog()
+local cashLog = RB.cashLog()
     local cEff = (cashLog and RB.earnLog and RB.earnLog > cashLog) and RB.earnLog or cashLog
     local estGain = cEff and RB.calcGainLog(cEff, curLog) or nil
     local th = curZero and 0.01 or (_log10(RB.thPct() / 100) + (curLog or 0))
 
-    if not autoRebirthActive then RB.status = "off"; return end
+if not autoRebirthActive then RB.status = "off"; return end
     RB.status = "verifying via popup..."
     RB.probeTryT = tick_()
     local rbBtn = RB.node(RB.gui() or g, "InvestorsMenu/Body/Rebirth")
@@ -3320,7 +2962,7 @@ function RB.runCheck(g)
         RB.lastInfo = RB.fmtPct(RB.pct)
         if trueGain < th then
 
-            RB.calibrate(trueGain, curLog, cashLog)
+RB.calibrate(trueGain, curLog, cashLog)
             RB.go = false; RB.goN = 0
             RB.status = sformat("%s  |  %s  |  wait", RB.thStr(), RB.lastInfo)
             print("[Rebirth] popup says " .. RB.lastInfo .. " (early) - calibrated, waiting")
@@ -3330,7 +2972,7 @@ function RB.runCheck(g)
         end
     else
 
-        if not (estGain and estGain >= th) then
+if not (estGain and estGain >= th) then
             RB.status = "popup unreadable - safe abort"
             print("[Rebirth] popup gain unreadable, est below threshold - abort, retry in 60s")
             RB.dismissAlert(); RB.closePanel(g); RB.lastPeek = tick_()
@@ -3341,35 +2983,36 @@ function RB.runCheck(g)
     RB.go = true
     RB.confirmRebirth(cf)
 
-    if (tick_() - (RB.lastReb or 0)) >= 5 then RB.closePanel(g) end
+if (tick_() - (RB.lastReb or 0)) >= 5 then RB.closePanel(g) end
 end
 
 function RB.tick()
     local rmb = false
     pcall_(function() if type(ismouse2pressed) == "function" then rmb = ismouse2pressed() end end)
     if rmb or not _windowFocused() then return end
+    if autoAscendActive and ASC.ready then RB.status = "waiting: ascension"; return end
     local now = tick_()
     if (now - (RB.lastReb or 0)) < 30 then RB.go = false; RB.status = "cooldown"; return end
 
-    if (now - (RB.softT or 0)) >= 6 then
+if (now - (RB.softT or 0)) >= 6 then
         RB.softT = now
         pcall_(RB.computeDecision)
     end
 
-    local fire = ((RB.go and (RB.goN or 0) >= 2) or RB.needCur) and true or false
+local fire = ((RB.go and (RB.goN or 0) >= 2) or RB.needCur) and true or false
 
-    if (now - (S.lastUser or 0)) < 5 then return end
+if (now - (S.lastUser or 0)) < 5 then return end
 
-    if MG.active and (now - (MG.busyT or 0)) < 5 then RB.status = "waiting: minigame"; return end
+if MG.active and (now - (MG.busyT or 0)) < 5 then RB.status = "waiting: minigame"; return end
 
-    if autoStandActive and (LSM.standBusyT or 0) ~= 0 and ((now - (LSM.standPassT or 0)) < 3 or (now - (LSM.standBusyT or 0)) < 4) then
+if autoStandActive and (LSM.standBusyT or 0) ~= 0 and ((now - (LSM.standPassT or 0)) < 3 or (now - (LSM.standBusyT or 0)) < 4) then
 
-        if fire and (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then RB.wantSlot = true end
+if fire and (now - (RB.lastPeek or 0)) >= (RB.peekEvery or 60) then RB.wantSlot = true end
         RB.status = "waiting: auto stand"; return
     end
     if (not fire) or ((now - (RB.lastPeek or 0)) < (fire and 3 or (RB.peekEvery or 60))) then
 
-        local g = RB.gui()
+local g = RB.gui()
         if g and (RB.panelOpen(g) or RB.findConfirm()) then RB.ensureClosed(g) end
         return
     end
@@ -3388,13 +3031,10 @@ _wrap("auto-rebirth", function()
         else
             RB.go = false
         end
-        task_wait(CFG.slow and 1.4 or 0.8)
+        task_wait(0.8)
     end
 end)
 
--- The "Are you sure you want to evolve?" alert lives in Important/Alert/Main/Buttons (same template as the
--- rebirth confirm). The LEFTMOST button there is EVOLVE! (confirm); nvm is right of it; FREE is elsewhere
--- (Alert/Main/Sale). Accept TextButton OR ImageButton in case the buttons are images.
 local function findEvolveConfirm()
     local pg = getPlayerGui(); if not pg then return nil end
     local box = RB.node(pg, "Important/Alert/Main/Buttons")
@@ -3412,45 +3052,125 @@ local function findEvolveConfirm()
     return best
 end
 
--- Auto Evolve: PEEK the Evolution menu (the Progress text isn't reliably live while the menu is closed -
--- worked for one tester, not another). Each peek: open the "portal" sidebar button -> read live Progress ->
--- if 100% press Evolve + confirm -> close. Peeks often when close to ready, rarely otherwise (like rebirth).
-local _evolveLastPeek = 0
+local EVO_U2, EVO_U3 = 17.7, 13.6
+local EVO_REB_LOGA = _log10(1.8e17)
+local function _valAttr(name)
+    local t = myTycoon
+    if not t or not t.Parent then t = findMyTycoon(); myTycoon = t or myTycoon end
+    local v
+    pcall_(function()
+        local vals = t and t:FindFirstChild("Values")
+        local inner = vals and vals:FindFirstChild("Values")
+        if inner then v = inner:GetAttribute(name) end
+    end)
+    return tonumber_(v) or 0
+end
+local function evolveCompute()
+    local cashLog = _logAdd(_valAttr("Cash"), _valAttr("CashSpent"))
+    local cti = (cashLog > EVO_REB_LOGA) and (0.44 * (cashLog - EVO_REB_LOGA)) or 0
+    local total = _logAdd(_logAdd(_valAttr("Investors"), _valAttr("InvestorsSpent")), cti)
+    local th = EVO_U3 * _valAttr("Evolution") + EVO_U2
+    local pct = 10 ^ ((total - th) / EVO_U3) * 100
+    if pct > 100 then pct = 100 elseif pct < 0 then pct = 0 end
+    return pct, (total >= th)
+end
+local _evolveLastTry = 0
 _wrap("auto-evolve", function()
     while ScriptActive do
         syncFromUI()
         if not autoEvolveActive then task_wait(0.6); continue end
-        if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() then task_wait(0.4); continue end
-        local interval = (evolveProgress >= 90) and 8 or 45
-        if (tick_() - _evolveLastPeek) < interval then task_wait(0.5); continue end
-        _evolveLastPeek = tick_()
+        if autoAscendActive and ASC.ready then task_wait(0.6); continue end
 
-        local g = RB.gui()
+local pct, ready = evolveCompute()
+        evolveProgress = pct
+        if not ready then task_wait(1.5); continue end
+
+if (tick_() - _evolveLastTry) < 8 then task_wait(1); continue end
+        if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() or cutsceneActive() then task_wait(0.4); continue end
+        _evolveLastTry = tick_()
+
+local g = RB.gui()
         if not g then task_wait(1); continue end
         RB.busyT = tick_()
-        RB.prepClick()                                              -- exit lemon zoom so the mouse can click GUI
+        RB.prepClick()
         local side = RB.node(g, "Sidebar/Container/Evolution")
-        if not (side and RB.click(side)) then task_wait(0.5); continue end   -- open the menu (click the portal)
+        if not (side and RB.click(side)) then task_wait(0.5); continue end
         task_wait(0.35)
-        local prog = RB.node(RB.gui(), "EvolutionMenu/Body/Progress")
-        local pct = tonumber((prog and RB.text(prog) or ""):match("([%d%.]+)")) or 0
-        evolveProgress = pct
-        if pct >= 100 then
+
+local prog = RB.node(RB.gui(), "EvolutionMenu/Body/Progress")
+        local menuPct = tonumber((prog and RB.text(prog) or ""):match("([%d%.]+)"))
+        if (menuPct and menuPct >= 100) or (not menuPct and ready) then
             local btn = RB.node(RB.gui(), "EvolutionMenu/Body/Evolve")
             if btn and RB.click(btn) then
                 task_wait(0.4)
-                local cf                                            -- confirm "Are you sure?" -> EVOLVE! (not nvm/FREE)
+                local cf
                 for _ = 1, 10 do cf = findEvolveConfirm(); if cf then break end; task_wait(0.15) end
                 if cf and RB.click(cf) then
+                    S.cutsceneT = tick_()
                     STATS.evolves = STATS.evolves + 1
-                    print("[Evolve] evolved (confirmed); was " .. pct .. "%")
+                    print("[Evolve] evolved (attr " .. sformat("%.1f%%", pct) .. ", menu " .. tostring_(menuPct) .. ")")
                 else
                     print("[Evolve] pressed Evolve but no confirm appeared")
                 end
                 task_wait(0.6)
             end
         end
-        pcall_(function() local cl = RB.node(RB.gui(), "EvolutionMenu/Close"); if cl then RB.click(cl) end end)  -- close the menu
+        pcall_(function() local cl = RB.node(RB.gui(), "EvolutionMenu/Close"); if cl then RB.click(cl) end end)
+        task_wait(0.4)
+    end
+end)
+
+local function ascendReady()
+    local models = purchasables()
+    if #models == 0 then return false end
+    local bought, total = 0, 0
+    for _, m in ipairs_(models) do
+        if not isDecorModel(m) then
+            total = total + 1
+            local isB = false
+            pcall_(function() isB = (m:GetAttribute("Purchased") == true) end)
+            if isB then bought = bought + 1 end
+        end
+    end
+    ASC.bought, ASC.total = bought, total
+    return total > 0 and bought >= total
+end
+local _ascendLastTry = 0
+_wrap("auto-ascend", function()
+    while ScriptActive do
+        syncFromUI()
+        if not autoAscendActive then ASC.ready = false; task_wait(0.8); continue end
+        ASC.ready = ascendReady()
+        if not ASC.ready then task_wait(2); continue end
+
+if (tick_() - _ascendLastTry) < 8 then task_wait(1); continue end
+        if _standIsTapping or RB.go or (tick_() - (RB.busyT or 0)) < 4 or MG.lemBusy() or cutsceneActive() then task_wait(0.4); continue end
+        _ascendLastTry = tick_()
+        ASC.busyT = tick_()
+
+local g = RB.gui()
+        if not g then task_wait(1); continue end
+        RB.busyT = tick_()
+        RB.prepClick()
+        local side = RB.node(g, "Sidebar/Container/Ascension")
+        if not (side and RB.click(side)) then task_wait(0.5); continue end
+        task_wait(0.35)
+        local btn = RB.node(RB.gui(), "AscensionMenu/Body/Ascend")
+        if btn and RB.click(btn) then
+            task_wait(0.4)
+            local cf
+            for _ = 1, 10 do cf = findEvolveConfirm(); if cf then break end; task_wait(0.15) end
+            if cf and RB.click(cf) then
+                S.cutsceneT = tick_()
+                abModels = nil
+                STATS.ascends = STATS.ascends + 1
+                print("[Ascend] ascended (everything bought)")
+            else
+                print("[Ascend] pressed Ascend but no confirm appeared")
+            end
+            task_wait(0.6)
+        end
+        pcall_(function() local cl = RB.node(RB.gui(), "AscensionMenu/Close"); if cl then RB.click(cl) end end)
         task_wait(0.4)
     end
 end)
@@ -3510,7 +3230,7 @@ function MG.findBtn(want, needPos)
         end
     end
 
-    local now = tick_()
+local now = tick_()
     if type(MG.fsT) ~= "table" then MG.fsT = {} end
     if (now - (MG.fsT[want] or 0)) < 1.5 then return nil end
     MG.fsT[want] = now
@@ -3522,7 +3242,7 @@ function MG.click(btn)
     if not ap or not az then return end
     if ap.X <= 1 and ap.Y <= 1 then return end
 
-    local ox, oy = S.mx, S.my
+local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
     LSM.lastBot = tick_()
     pcall_(function()
@@ -3542,7 +3262,7 @@ function MG.entryPos()
         for _, c in ipairs_(mg:GetChildren()) do
             local nm = tostring_(c.Name)
 
-            if MG.enabled[nm] ~= false and nm:lower():find("minigame") and not nm:lower():find("trade") then
+if MG.enabled[nm] ~= false and nm:lower():find("minigame") and not nm:lower():find("trade") then
                 for _, d in ipairs_(c:GetDescendants()) do
                     if tostring_(d.ClassName) == "ProximityPrompt" and d.Parent then
                         pos = _standPartPos(d.Parent); return
@@ -3594,7 +3314,7 @@ end
 
 function MG.spamCheer(btn)
 
-    local vw, vh = 1920, 1080
+local vw, vh = 1920, 1080
     pcall_(function() local v = camera.ViewportSize; vw = v.X; vh = v.Y end)
     local cx, cy = mfloor(vw * 0.5), mfloor(vh * CFG.cheerY)
     local ox, oy = S.mx, S.my
@@ -3647,7 +3367,7 @@ function MG.clickCheck()
     local ox, oy = S.mx, S.my
     pcall_(function() if mouse then ox = mouse.X; oy = mouse.Y end end)
 
-    pcall_(function()
+pcall_(function()
         local pg = getPlayerGui()
         local popup = pg and pg:FindFirstChild("Popup")
         local chk = popup and popup:FindFirstChild("Check")
@@ -3670,7 +3390,7 @@ function MG.clickCheck()
         end
     end)
 
-    pcall_(function()
+pcall_(function()
         LSM.lastBot = tick_()
         mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); MG.tap()
         mousemoveabs(mfloor(vw * 0.5), mfloor(vh * 0.5)); MG.tap()
@@ -3682,7 +3402,7 @@ _wrap("auto-minigame", function()
         if MG.active then
             pcall_(function()
 
-                local cheer = MG.findBtn("CHEER")
+local cheer = MG.findBtn("CHEER")
                 if cheer then
                     LSM.standBusyT = tick_()
                     MG.sessPost = 0
@@ -3691,9 +3411,9 @@ _wrap("auto-minigame", function()
                     return
                 end
 
-                local justRaced = (tick_() - (MG.raceEndT or 0)) < 30
+local justRaced = (tick_() - (MG.raceEndT or 0)) < 30
 
-                if justRaced then
+if justRaced then
                     local exitBtn = MG.findBtn("EXIT")
                     local chequeShown = false
                     pcall_(function()
@@ -3715,14 +3435,14 @@ _wrap("auto-minigame", function()
                     end
                 end
 
-                if MG.findBtn("PICK") then
+if MG.findBtn("PICK") then
                     LSM.standBusyT = tick_(); MG.busyT = tick_()
                     MG.clickSlots()
                     task_wait(0.4)
                     return
                 end
 
-                local cd = MG.timerSec()
+local cd = MG.timerSec()
                 if cd and cd > 0 then MG.miniEnd = tick_() + cd end
                 local localCd = MG.miniEnd and (MG.miniEnd - tick_()) or nil
                 if (cd and cd > 0) or (localCd and localCd > 0) then
@@ -3730,7 +3450,7 @@ _wrap("auto-minigame", function()
                     return
                 end
 
-                if not MG.miniEnd then
+if not MG.miniEnd then
                     local synced = false
                     for _ = 1, 6 do
                         if not MG.active then break end
@@ -3743,9 +3463,9 @@ _wrap("auto-minigame", function()
                     if synced then task_wait(0.5); return end
                 end
 
-                if (tick_() - (MG.lastEntryTry or 0)) < 6 then task_wait(0.5); return end
+if (tick_() - (MG.lastEntryTry or 0)) < 6 then task_wait(0.5); return end
 
-                if (tick_() - (RB.busyT or 0)) < 4 then task_wait(0.5); return end
+if (tick_() - (RB.busyT or 0)) < 4 then task_wait(0.5); return end
                 MG.lastEntryTry = tick_()
                 LSM.standBusyT = tick_()
                 MG.entryT = tick_()
@@ -3763,7 +3483,7 @@ _wrap("auto-minigame", function()
                 task_wait(started and 0.3 or 2)
             end)
         end
-        task_wait(CFG.slow and 0.5 or 0.2)
+        task_wait(0.2)
     end
 end)
 
@@ -3778,7 +3498,7 @@ _wrap("auto-stand", function()
             continue
         end
 
-        if not myTycoon or not myTycoon.Parent then
+if not myTycoon or not myTycoon.Parent then
             myTycoon = findMyTycoon()
             if not myTycoon then
                 if tick_() - lastDiag > 3 then
@@ -3790,22 +3510,22 @@ _wrap("auto-stand", function()
             end
         end
 
-        if autoBuyActive and _anyBuyableNowButtons() then
+if autoBuyActive and _anyBuyableNowButtons() then
             task_wait(0.3)
             continue
         end
 
-        if (tick_() - (LSM.buySweepT or 0)) < 4 then
+if (tick_() - (LSM.buySweepT or 0)) < 4 then
             task_wait(0.3)
             continue
         end
 
-        if (tick_() - (RB.busyT or 0)) < 4 then
+if (tick_() - (RB.busyT or 0)) < 4 then
             task_wait(0.5)
             continue
         end
 
-        if autoRebirthActive and RB.wantSlot then
+if autoRebirthActive and RB.wantSlot then
             local w0 = tick_()
             while ScriptActive and autoStandActive and autoRebirthActive
                   and RB.wantSlot and (tick_() - w0) < 35 do
@@ -3818,21 +3538,21 @@ _wrap("auto-stand", function()
             end
         end
 
-        if MG.lemBusy() then
+if MG.lemBusy() then
             task_wait(0.5)
             continue
         end
 
-        local res = runLocationsPass(firstRun)
+local res = runLocationsPass(firstRun)
         firstRun = false
 
-        LSM.standBusyT = 0; LSM.zoomInT = 0
+LSM.standBusyT = 0; LSM.zoomInT = 0
         if res == "off" then
             task_wait(0.05)
             continue
         end
 
-        if res == "yield" then
+if res == "yield" then
             local w0 = tick_()
             while ScriptActive and autoStandActive and autoBuyActive
                   and _anyBuyableNowButtons() and (tick_() - w0) < 15 do
@@ -3841,7 +3561,7 @@ _wrap("auto-stand", function()
             continue
         end
 
-        local t0 = tick_()
+local t0 = tick_()
         while ScriptActive and autoStandActive do
             local rest = lemonFarmActive and CFG.standRest or STAND_LOOP_DELAY
             LSM.standNextT = t0 + rest
@@ -3878,7 +3598,6 @@ end)
 
 _G.MatchaCleanup = function()
     pcall_(LSM.returnHome)
-    pcall_(FX.restore)
     ScriptActive = false
     pcall_(function() if UIRef.win then UIRef.win:Destroy() end end)
     for _, obj in ipairs_(drawObjs) do
@@ -3887,5 +3606,5 @@ _G.MatchaCleanup = function()
     print("[Hub] Cleanup done")
 end
 
-rprint("sell lemons v23 loaded  |  by Inspecttor")
+rprint("sell lemons v24 loaded  |  by Inspecttor")
 
