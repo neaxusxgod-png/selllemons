@@ -569,7 +569,7 @@ if Lib then
     })
     UIRef.win = window
 
-local tab1 = window:Tab("Main", "gauge")
+local tab1 = window:Tab("Main", "home")
 
 local farm = tab1:Section("Farming", "Left", "auto-farms, stands & rebirth")
     UIRef.t.AutoBuy = farm:Toggle("Auto Buy", false, function(val)
